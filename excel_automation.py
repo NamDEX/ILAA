@@ -16,7 +16,6 @@ The process involves:
 
 import os
 from datetime import datetime
-from difflib import SequenceMatcher
 
 import openpyxl
 import win32com.client
@@ -54,22 +53,18 @@ END_ROW = 50
 # ==================================================================================================
 
 
-def find_best_match_file(directory, entity_name):
+def find_exact_match_file(directory, entity_name):
     """
-    Finds the file in the given directory that best matches the entity name.
-    It uses a sequence matching algorithm to find the most similar filename.
-    A threshold is used to prevent obviously wrong matches.
+    Finds a file in the given directory that exactly matches the entity name,
+    ignoring the file extension. The match is case-insensitive.
 
     Args:
         directory (str): The path to the directory to search in.
         entity_name (str): The name of the entity to match.
 
     Returns:
-        str: The full path to the best matching file, or None if no suitable match is found.
+        str: The full path to the matching file, or None if no match is found.
     """
-    best_match_filename = None
-    highest_ratio = 0.6  # Match threshold
-
     if not os.path.isdir(directory):
         print(f"Warning: Output directory not found: {directory}")
         return None
@@ -77,13 +72,8 @@ def find_best_match_file(directory, entity_name):
     for filename in os.listdir(directory):
         if filename.endswith(('.xlsx', '.xlsb', '.xlsm')):
             fname_without_ext, _ = os.path.splitext(filename)
-            ratio = SequenceMatcher(None, entity_name.lower(), fname_without_ext.lower()).ratio()
-            if ratio > highest_ratio:
-                highest_ratio = ratio
-                best_match_filename = filename
-
-    if best_match_filename:
-        return os.path.join(directory, best_match_filename)
+            if fname_without_ext.lower() == entity_name.lower():
+                return os.path.join(directory, filename)
     return None
 
 
@@ -143,10 +133,10 @@ def process_tab(execution_workbook, sheet_name, global_view_file, output_dir):
             entity_name = entity['name']
             print(f"\n---> Processing Entity: {entity_name} (Row: {row})")
 
-            entity_file_path = find_best_match_file(output_dir, entity_name)
+            entity_file_path = find_exact_match_file(output_dir, entity_name)
 
             if entity_file_path:
-                print(f"Found best match file: {entity_file_path}")
+                print(f"Found exact match file: {entity_file_path}")
 
                 # Update external links
                 print("Searching for and replacing external links...")
@@ -158,8 +148,7 @@ def process_tab(execution_workbook, sheet_name, global_view_file, output_dir):
                             # Heuristic: assume the link to replace contains a filename
                             # similar to the entity name.
                             link_filename = os.path.basename(link)
-                            score = SequenceMatcher(None, entity_name.lower(), os.path.splitext(link_filename)[0].lower()).ratio()
-                            if score > 0.6: # Similarity threshold
+                            if os.path.splitext(link_filename)[0].lower() == entity_name.lower():
                                 print(f"Found link to replace: {link}")
                                 gv_workbook.ChangeLink(link, entity_file_path, Type=1)
                                 print(f"Link successfully replaced with: {entity_file_path}")
