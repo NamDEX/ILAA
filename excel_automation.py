@@ -80,15 +80,10 @@ def find_exact_match_file(directory, entity_name):
 def process_tab(execution_workbook, sheet_name, global_view_file, output_dir):
     """
     Processes a single tab (LCR, NSFR, or PRA110) in the Global Execution File.
-
-    Args:
-        execution_workbook (openpyxl.Workbook): The workbook object for the execution file.
-        sheet_name (str): The name of the tab to process.
-        global_view_file (str): The path to the Global View file for this tab.
-        output_dir (str): The path to the output directory containing entity files.
+    First, it checks if there are any entities to process before opening any files.
     """
     print("--------------------------------------------------")
-    print(f"Processing '{sheet_name}' tab...")
+    print(f"Scanning '{sheet_name}' tab for entities to process...")
     print("--------------------------------------------------")
 
     sheet = execution_workbook[sheet_name]
@@ -101,9 +96,10 @@ def process_tab(execution_workbook, sheet_name, global_view_file, output_dir):
                 entities_to_process.append({'row': row, 'name': entity_name})
 
     if not entities_to_process:
-        print(f"No entities marked with 'Y' found in '{sheet_name}' tab.")
+        print(f"No entities marked with 'Y' to process in '{sheet_name}' tab. Skipping.")
         return
 
+    print(f"Found {len(entities_to_process)} entities to process. Starting Excel operations...")
     excel = None
     gv_workbook = None
     try:
@@ -114,31 +110,33 @@ def process_tab(execution_workbook, sheet_name, global_view_file, output_dir):
 
         gv_workbook = excel.Workbooks.Open(global_view_file)
 
-        # Paste TOR data only once when the file is first opened.
-        print("Pasting TOR data...")
+        # Perform a clipboard-free data transfer for the TOR data.
+        print("Transferring TOR data...")
         try:
-            tor_workbook = excel.Workbooks.Open(TOR_FILE)
-            tor_sheet = tor_workbook.Sheets(TOR_SOURCE_SHEET_NAME)
+            # Open TOR file using openpyxl to read data into memory
+            tor_wb_data = openpyxl.load_workbook(TOR_FILE, data_only=True)
+            tor_sheet_data = tor_wb_data[TOR_SOURCE_SHEET_NAME]
 
+            data_to_transfer = []
+            for row in tor_sheet_data.iter_rows():
+                data_to_transfer.append([cell.value for cell in row])
+
+            tor_wb_data.close()
+
+            # Get destination sheet and clear it
             gv_tor_sheet = gv_workbook.Sheets(TOR_SHEET_NAME)
-            gv_tor_sheet.Cells.ClearContents() # Clear the sheet before pasting
+            gv_tor_sheet.Cells.ClearContents()
 
-            # Copy the entire source sheet
-            tor_sheet.Cells.Copy()
+            # Write data from memory to the destination sheet
+            # This is a bit slow with win32com, but extremely reliable.
+            for r_idx, row_data in enumerate(data_to_transfer, 1):
+                for c_idx, cell_data in enumerate(row_data, 1):
+                    if cell_data is not None:
+                        gv_tor_sheet.Cells(r_idx, c_idx).Value = cell_data
 
-            # Activate the destination sheet and paste
-            gv_tor_sheet.Activate()
-            gv_tor_sheet.Range("A1").Select()
-            gv_tor_sheet.Paste()
-
-            tor_workbook.Close(SaveChanges=False)
-
-            # Clear the clipboard
-            excel.Application.CutCopyMode = False
-
-            print("TOR data pasted successfully.")
+            print("TOR data transferred successfully.")
         except Exception as e:
-            print(f"Error during TOR paste operation: {e}")
+            print(f"Error during TOR data transfer: {e}")
 
         for entity in entities_to_process:
             row = entity['row']
