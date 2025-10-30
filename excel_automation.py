@@ -119,11 +119,19 @@ def process_tab(execution_workbook, sheet_name, global_view_file, output_dir):
         try:
             tor_workbook = excel.Workbooks.Open(TOR_FILE)
             tor_sheet = tor_workbook.Sheets(TOR_SOURCE_SHEET_NAME)
-            tor_sheet.Cells.Copy()
 
             gv_tor_sheet = gv_workbook.Sheets(TOR_SHEET_NAME)
-            gv_tor_sheet.Paste(gv_tor_sheet.Range("A1"))
+            gv_tor_sheet.Cells.Clear() # Clear the sheet before pasting
+
+            # Copy and Paste Special
+            tor_sheet.Cells.Copy()
+            gv_tor_sheet.Range("A1").PasteSpecial()
+
             tor_workbook.Close(SaveChanges=False)
+
+            # Clear the clipboard
+            excel.Application.CutCopyMode = False
+
             print("TOR data pasted successfully.")
         except Exception as e:
             print(f"Error during TOR paste operation: {e}")
@@ -168,6 +176,7 @@ def process_tab(execution_workbook, sheet_name, global_view_file, output_dir):
                 sheet.cell(row=row, column=8).value = '' # Clear previous error message
             else:
                 print(f"File not found for entity: {entity_name}")
+                sheet.cell(row=row, column=6).value = 'N'
                 sheet.cell(row=row, column=8).value = 'File not found'
 
         # Recalculate, Save, and Close after all entities for the tab are processed
