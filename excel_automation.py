@@ -164,11 +164,16 @@ def process_tab(execution_workbook, sheet_name, global_view_file, output_dir):
                                 break # Assume one link per entity
                         if not link_replaced:
                             print("Could not find a suitable link to replace for this entity.")
+                            sheet.cell(row=row, column=9).value = 'N'
+                        else:
+                            sheet.cell(row=row, column=9).value = 'Y'
                     else:
                         print("No external links found in this workbook.")
+                        sheet.cell(row=row, column=9).value = 'N'
 
                 except Exception as e:
                     print(f"An error occurred during link replacement: {e}")
+                    sheet.cell(row=row, column=9).value = 'N'
 
                 # Update status in the execution file
                 sheet.cell(row=row, column=6).value = 'Y'
