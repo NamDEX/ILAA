@@ -121,11 +121,15 @@ def process_tab(execution_workbook, sheet_name, global_view_file, output_dir):
             tor_sheet = tor_workbook.Sheets(TOR_SOURCE_SHEET_NAME)
 
             gv_tor_sheet = gv_workbook.Sheets(TOR_SHEET_NAME)
-            gv_tor_sheet.Cells.Clear() # Clear the sheet before pasting
+            gv_tor_sheet.Cells.ClearContents() # Clear the sheet before pasting
 
-            # Copy and Paste Special
+            # Copy the entire source sheet
             tor_sheet.Cells.Copy()
-            gv_tor_sheet.Range("A1").PasteSpecial()
+
+            # Activate the destination sheet and paste
+            gv_tor_sheet.Activate()
+            gv_tor_sheet.Range("A1").Select()
+            gv_tor_sheet.Paste()
 
             tor_workbook.Close(SaveChanges=False)
 
