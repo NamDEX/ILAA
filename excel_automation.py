@@ -185,6 +185,9 @@ def process_tab(execution_workbook, sheet_name, global_view_file, output_dir):
         excel.Calculate()
         print("Recalculation complete.")
 
+        print("Activating the first sheet before saving...")
+        gv_workbook.Worksheets(1).Activate()
+
         print(f"Saving and closing '{global_view_file}'...")
         gv_workbook.Close(SaveChanges=True)
         print("File saved and closed.")
