@@ -42,7 +42,7 @@ LCR_SHEET_NAME = "LCR"
 NSFR_SHEET_NAME = "NSFR"
 PRA110_SHEET_NAME = "PRA110"
 TOR_SHEET_NAME = "TOR"
-TOR_SOURCE_SHEET_NAME = "Sheet 1"
+TOR_SOURCE_SHEET_NAME = "Sheet1"
 
 # Row Range
 START_ROW = 5
@@ -110,33 +110,31 @@ def process_tab(execution_workbook, sheet_name, global_view_file, output_dir):
 
         gv_workbook = excel.Workbooks.Open(global_view_file)
 
-        # Perform a clipboard-free data transfer for the TOR data.
-        print("Transferring TOR data...")
+        # Paste TOR data, preserving formatting.
+        print("Pasting TOR data...")
         try:
-            # Open TOR file using openpyxl to read data into memory
-            tor_wb_data = openpyxl.load_workbook(TOR_FILE, data_only=True)
-            tor_sheet_data = tor_wb_data[TOR_SOURCE_SHEET_NAME]
+            tor_workbook = excel.Workbooks.Open(TOR_FILE)
+            tor_sheet = tor_workbook.Sheets(TOR_SOURCE_SHEET_NAME)
 
-            data_to_transfer = []
-            for row in tor_sheet_data.iter_rows():
-                data_to_transfer.append([cell.value for cell in row])
-
-            tor_wb_data.close()
-
-            # Get destination sheet and clear it
             gv_tor_sheet = gv_workbook.Sheets(TOR_SHEET_NAME)
-            gv_tor_sheet.Cells.ClearContents()
+            gv_tor_sheet.Cells.ClearContents() # Clear the sheet before pasting
 
-            # Write data from memory to the destination sheet
-            # This is a bit slow with win32com, but extremely reliable.
-            for r_idx, row_data in enumerate(data_to_transfer, 1):
-                for c_idx, cell_data in enumerate(row_data, 1):
-                    if cell_data is not None:
-                        gv_tor_sheet.Cells(r_idx, c_idx).Value = cell_data
+            # Copy the entire source sheet
+            tor_sheet.Cells.Copy()
 
-            print("TOR data transferred successfully.")
+            # Activate the destination sheet and paste
+            gv_tor_sheet.Activate()
+            gv_tor_sheet.Range("A1").Select()
+            gv_tor_sheet.Paste()
+
+            tor_workbook.Close(SaveChanges=False)
+
+            # Clear the clipboard
+            excel.Application.CutCopyMode = False
+
+            print("TOR data pasted successfully.")
         except Exception as e:
-            print(f"Error during TOR data transfer: {e}")
+            print(f"Error during TOR paste operation: {e}")
 
         for entity in entities_to_process:
             row = entity['row']
@@ -194,8 +192,12 @@ def process_tab(execution_workbook, sheet_name, global_view_file, output_dir):
     except Exception as e:
         print(f"An error occurred while processing '{sheet_name}': {e}")
     finally:
+        # Ensure Excel is properly closed and objects are released
+        if gv_workbook:
+            del gv_workbook
         if excel:
             excel.Quit()
+            del excel
         print(f"Finished processing '{sheet_name}' tab.")
 
 
