@@ -337,16 +337,40 @@ def main():
         row['TOTAL_USD'] = total_usd
         row['TOTAL_GBP'] = total_gbp
 
+        # D. Calculate EFF_UNIT_PRICE
+        # EFF_UNIT_PRICE_USD = TOTAL_USD / QTY
+        # EFF_UNIT_PRICE_GBP = TOTAL_GBP / QTY
+        # Handle Division by Zero
+
+        if qty == 0:
+            row['EFF_UNIT_PRICE_USD'] = Decimal(0)
+            row['EFF_UNIT_PRICE_GBP'] = Decimal(0)
+        else:
+            row['EFF_UNIT_PRICE_USD'] = total_usd / qty
+            row['EFF_UNIT_PRICE_GBP'] = total_gbp / qty
+
         processed_rows.append(row)
 
     final_df = pd.DataFrame(processed_rows)
 
     # 5. Final Formatting
-    cols = ['EXCHANGE', 'TIME_UTC', 'TXN_TYPE', 'COIN', 'QTY', 'TOTAL_USD', 'FX_RATE', 'TOTAL_GBP']
+    cols = ['EXCHANGE', 'TIME_UTC', 'TXN_TYPE', 'COIN', 'QTY', 'TOTAL_USD', 'FX_RATE', 'TOTAL_GBP', 'EFF_UNIT_PRICE_USD', 'EFF_UNIT_PRICE_GBP']
     final_df = final_df[cols]
 
     # Sort
     final_df = final_df.sort_values(by='TIME_UTC', ascending=True)
+
+    # Pre-Save: Remove timezone for Excel compatibility
+    # Excel does not support timezone-aware datetimes.
+    # We will keep the original final_df for CSV (which handles TZ strings fine),
+    # but create a copy for Excel with TZ stripped (or converted to string).
+    # Converting to string is safest to preserve the visual UTC offset info if needed,
+    # but normally users just want the date/time.
+    # Let's convert to TZ-naive (UTC) for Excel.
+
+    final_df_xlsx = final_df.copy()
+    if 'TIME_UTC' in final_df_xlsx.columns:
+         final_df_xlsx['TIME_UTC'] = final_df_xlsx['TIME_UTC'].dt.tz_localize(None)
 
     # Save
     # Ensure directory exists
@@ -358,11 +382,22 @@ def main():
             pass # Might fail on permissions, but user config implies paths exist or are writable
 
     try:
+        # Save CSV
         final_df.to_csv(OUTPUT_FILE_NAME, index=False)
+
+        # Save XLSX
+        # Replace .csv extension with .xlsx or append if no extension
+        if OUTPUT_FILE_NAME.lower().endswith('.csv'):
+            output_xlsx = OUTPUT_FILE_NAME[:-4] + '.xlsx'
+        else:
+            output_xlsx = OUTPUT_FILE_NAME + '.xlsx'
+
+        final_df_xlsx.to_excel(output_xlsx, index=False)
+
         # Summary
         n_coinbase = len(final_df[final_df['EXCHANGE'] == 'Coinbase'])
         n_binance = len(final_df[final_df['EXCHANGE'] == 'Binance'])
-        print(f"\nSUCCESS. Total Rows: {len(final_df)}. Coinbase: {n_coinbase}, Binance: {n_binance}. File saved to {OUTPUT_FILE_NAME}.")
+        print(f"\nSUCCESS. Total Rows: {len(final_df)}. Coinbase: {n_coinbase}, Binance: {n_binance}. Files saved to {OUTPUT_FILE_NAME} and {output_xlsx}.")
     except Exception as e:
         logger.error(f"Failed to save output file: {e}")
 
