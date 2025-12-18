@@ -6,9 +6,9 @@ import os
 import sys
 
 ### USER CONFIGURATION ###
-COINBASE_FILE_PATH = 'coinbase.csv'
-BINANCE_FILE_PATH = 'binance.csv'
-OUTPUT_FILE_NAME = 'master_crypto_ledger.csv'
+COINBASE_FILE_PATH = r"C:\Projects Python\Crypto DEC25\Input\coinbase.csv"
+BINANCE_FILE_PATH = r"C:\Projects Python\Crypto DEC25\Input\binance.csv"
+OUTPUT_FILE_NAME = r"C:\Projects Python\Crypto DEC25\Output\master_crypto_ledger.csv"
 
 # Configure logging for clear console output
 import logging
@@ -82,6 +82,14 @@ def safe_decimal_conversion(val):
     except:
         return Decimal(0)
 
+def normalize_columns(df):
+    """
+    Normalizes dataframe columns to uppercase for case-insensitive matching.
+    Returns the dataframe with upper-case columns.
+    """
+    df.columns = [c.strip().upper() for c in df.columns]
+    return df
+
 def parse_coinbase(filepath):
     """
     Parses Coinbase CSV.
@@ -94,32 +102,66 @@ def parse_coinbase(filepath):
     try:
         df = pd.read_csv(filepath)
 
-        required_cols = ['Timestamp', 'Transaction Type', 'Asset', 'Quantity Transacted', 'Total (inclusive of fees and/or spread)']
-        missing = [c for c in required_cols if c not in df.columns]
+        # Case insensitive column matching
+        # Mapping requested:
+        # 'Timestamp', 'Transaction Type', 'Asset', 'Quantity Transacted', 'Total (inclusive of fees and/or spread)'
+
+        # Create a map of UPPERCASE -> Original/Standard names
+        req_cols_map = {
+            'TIMESTAMP': 'Timestamp',
+            'TRANSACTION TYPE': 'Transaction Type',
+            'ASSET': 'Asset',
+            'QUANTITY TRANSACTED': 'Quantity Transacted',
+            'TOTAL (INCLUSIVE OF FEES AND/OR SPREAD)': 'Total (inclusive of fees and/or spread)'
+        }
+
+        # Normalize df columns to upper to check existence
+        df_upper_cols = {c.strip().upper(): c for c in df.columns}
+
+        # Check for missing columns
+        missing = []
+        rename_map = {}
+
+        for req_upper, req_std in req_cols_map.items():
+            if req_upper not in df_upper_cols:
+                missing.append(req_std)
+            else:
+                rename_map[df_upper_cols[req_upper]] = req_upper # Rename actual col to UPPER internal name temporarily
+
         if missing:
-            logger.error(f"Coinbase file missing columns: {missing}")
+            logger.error(f"Coinbase file missing columns (case-insensitive check): {missing}")
             return pd.DataFrame()
 
-        df['TIME_UTC'] = pd.to_datetime(df['Timestamp'], utc=True)
+        # Rename to the UPPER keys for consistent access
+        df = df.rename(columns=rename_map)
+
+        # Column Mapping (using the UPPER keys now)
+        # 'TIMESTAMP' -> 'TIME_UTC'
+        df['TIME_UTC'] = pd.to_datetime(df['TIMESTAMP'], utc=True)
 
         df = df.rename(columns={
-            'Transaction Type': 'TXN_TYPE_RAW',
-            'Asset': 'COIN',
-            'Quantity Transacted': 'QTY',
-            'Total (inclusive of fees and/or spread)': 'TOTAL_USD'
+            'TRANSACTION TYPE': 'TXN_TYPE_RAW',
+            'ASSET': 'COIN',
+            'QUANTITY TRANSACTED': 'QTY',
+            'TOTAL (INCLUSIVE OF FEES AND/OR SPREAD)': 'TOTAL_USD'
         })
 
         df['EXCHANGE'] = 'Coinbase'
 
+        # Filtering & Transaction Mapping - Case Insensitive
+        # Normalize TXN_TYPE_RAW to UPPER
+        df['TXN_TYPE_RAW'] = df['TXN_TYPE_RAW'].astype(str).str.strip().str.upper()
+
+        # Map keys are all UPPER
         keep_map = {
-            'Advance Trade Buy': 'BUY',
-            'Advanced Trade Buy': 'BUY',
-            'Buy': 'BUY',
-            'Advance Trade Sell': 'SELL',
-            'Advanced Trade Sell': 'SELL',
-            'Sell': 'SELL',
-            'Reward Income': 'INCOME',
-            'Staking Income': 'INCOME'
+            'ADVANCE TRADE BUY': 'BUY',
+            'ADVANCED TRADE BUY': 'BUY',
+            'BUY': 'BUY',
+            'ADVANCE TRADE SELL': 'SELL',
+            'ADVANCED TRADE SELL': 'SELL',
+            'SELL': 'SELL',
+            'REWARD INCOME': 'INCOME',
+            'STAKING INCOME': 'INCOME'
         }
 
         df = df[df['TXN_TYPE_RAW'].isin(keep_map.keys())].copy()
@@ -143,32 +185,61 @@ def parse_binance(filepath):
     try:
         df = pd.read_csv(filepath)
 
-        required_cols = ['Date(UTC)', 'Base Asset', 'Quote Asset', 'Type', 'Amount', 'Total']
-        missing = [c for c in required_cols if c not in df.columns]
+        # Case insensitive column matching
+        # Req: 'Date(UTC)', 'Base Asset', 'Quote Asset', 'Type', 'Amount', 'Total'
+
+        req_cols_map = {
+            'DATE(UTC)': 'Date(UTC)',
+            'BASE ASSET': 'Base Asset',
+            'QUOTE ASSET': 'Quote Asset',
+            'TYPE': 'Type',
+            'AMOUNT': 'Amount',
+            'TOTAL': 'Total'
+        }
+
+        df_upper_cols = {c.strip().upper(): c for c in df.columns}
+
+        missing = []
+        rename_map = {}
+
+        for req_upper, req_std in req_cols_map.items():
+            if req_upper not in df_upper_cols:
+                # Try finding without (UTC) maybe? User said strict mapping but case insensitive.
+                # Let's stick to the names provided but allow case variance.
+                missing.append(req_std)
+            else:
+                rename_map[df_upper_cols[req_upper]] = req_upper
+
         if missing:
             logger.error(f"Binance file missing columns: {missing}")
             return pd.DataFrame()
 
-        df['TIME_UTC'] = pd.to_datetime(df['Date(UTC)'], utc=True)
+        df = df.rename(columns=rename_map)
+
+        df['TIME_UTC'] = pd.to_datetime(df['DATE(UTC)'], utc=True)
 
         df = df.rename(columns={
-            'Base Asset': 'COIN',
-            'Quote Asset': 'CCY',
-            'Amount': 'QTY',
-            'Total': 'TOTAL_USD_RAW'
+            'BASE ASSET': 'COIN',
+            'QUOTE ASSET': 'CCY',
+            'AMOUNT': 'QTY',
+            'TOTAL': 'TOTAL_USD_RAW'
         })
 
         df['EXCHANGE'] = 'Binance'
 
-        keep_map = {'Buy': 'BUY', 'Sell': 'SELL'}
-        df = df[df['Type'].isin(keep_map.keys())].copy()
-        df['TXN_TYPE'] = df['Type'].map(keep_map)
+        # Logic 1: KEEP only 'Buy', 'Sell' (Case insensitive)
+        df['TYPE_NORM'] = df['TYPE'].astype(str).str.strip().str.upper()
 
-        # USDT Fix: Treat USDT as USD.
-        # Strict logic: "If CCY column is 'USDT', treat it as 'USD'."
-        # This implies we keep rows where CCY is USD or USDT.
+        keep_map = {'BUY': 'BUY', 'SELL': 'SELL'}
+        df = df[df['TYPE_NORM'].isin(keep_map.keys())].copy()
+        df['TXN_TYPE'] = df['TYPE_NORM'].map(keep_map)
+
+        # Logic 2: USDT Fix
+        # "If CCY column is 'USDT', treat it as 'USD'."
+        # Case insensitive check for CCY
+        df['CCY_NORM'] = df['CCY'].astype(str).str.strip().str.upper()
         valid_ccy = ['USD', 'USDT']
-        df = df[df['CCY'].isin(valid_ccy)].copy()
+        df = df[df['CCY_NORM'].isin(valid_ccy)].copy()
 
         df = df.rename(columns={'TOTAL_USD_RAW': 'TOTAL_USD'})
 
@@ -278,13 +349,22 @@ def main():
     final_df = final_df.sort_values(by='TIME_UTC', ascending=True)
 
     # Save
-    final_df.to_csv(OUTPUT_FILE_NAME, index=False)
+    # Ensure directory exists
+    output_dir = os.path.dirname(OUTPUT_FILE_NAME)
+    if output_dir and not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir)
+        except OSError:
+            pass # Might fail on permissions, but user config implies paths exist or are writable
 
-    # Summary
-    n_coinbase = len(final_df[final_df['EXCHANGE'] == 'Coinbase'])
-    n_binance = len(final_df[final_df['EXCHANGE'] == 'Binance'])
-
-    print(f"\nSUCCESS. Total Rows: {len(final_df)}. Coinbase: {n_coinbase}, Binance: {n_binance}. File saved to {OUTPUT_FILE_NAME}.")
+    try:
+        final_df.to_csv(OUTPUT_FILE_NAME, index=False)
+        # Summary
+        n_coinbase = len(final_df[final_df['EXCHANGE'] == 'Coinbase'])
+        n_binance = len(final_df[final_df['EXCHANGE'] == 'Binance'])
+        print(f"\nSUCCESS. Total Rows: {len(final_df)}. Coinbase: {n_coinbase}, Binance: {n_binance}. File saved to {OUTPUT_FILE_NAME}.")
+    except Exception as e:
+        logger.error(f"Failed to save output file: {e}")
 
 if __name__ == "__main__":
     main()
