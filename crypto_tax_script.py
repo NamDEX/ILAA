@@ -4,6 +4,8 @@ from decimal import Decimal, ROUND_HALF_UP
 import datetime
 import os
 import sys
+import openpyxl
+from openpyxl.utils import get_column_letter
 
 ### USER CONFIGURATION ###
 COINBASE_FILE_PATH = r"C:\Projects Python\Crypto DEC25\Input\coinbase.csv"
@@ -43,6 +45,10 @@ def fetch_fx_history():
 
         # Ensure index is datetime and normalized to date (midnight)
         fx_series.index = pd.to_datetime(fx_series.index).normalize()
+
+        # Remove timezone info to match the naive lookup dates in get_fx_rate
+        if fx_series.index.tz is not None:
+             fx_series.index = fx_series.index.tz_localize(None)
 
         # Sort index to ensure asof works
         fx_series = fx_series.sort_index()
@@ -249,6 +255,88 @@ def parse_binance(filepath):
         logger.error(f"Error parsing Binance file: {e}")
         return pd.DataFrame()
 
+def format_excel_file(filepath):
+    """
+    Applies custom formatting to the Excel file using openpyxl.
+    - Remove gridlines.
+    - Format QTY to 9 decimals.
+    - Format Money columns to 2 decimals.
+    - Autofit columns.
+    """
+    try:
+        wb = openpyxl.load_workbook(filepath)
+        ws = wb.active
+
+        # 1. Remove Gridlines
+        ws.sheet_view.showGridLines = False
+
+        # 2. Number Formatting
+        # Define formats
+        fmt_qty = '0.000000000'
+        fmt_money = '#,##0.00'
+        fmt_date = 'yyyy-mm-dd hh:mm:ss'
+
+        # Identify columns by header
+        # Headers are in row 1
+        headers = {cell.value: cell.column for cell in ws[1]}
+
+        # Columns to format
+        qty_col = headers.get('QTY')
+        money_cols = [headers.get(c) for c in ['TOTAL_USD', 'TOTAL_GBP', 'EFF_UNIT_PRICE_USD', 'EFF_UNIT_PRICE_GBP'] if c in headers]
+        date_col = headers.get('TIME_UTC')
+
+        # Iterate over rows (starting from row 2)
+        for row in ws.iter_rows(min_row=2):
+            # QTY
+            if qty_col:
+                row[qty_col-1].number_format = fmt_qty
+
+            # Money
+            for col_idx in money_cols:
+                if col_idx and col_idx <= len(row): # check if col_idx is within bounds of row
+                     # row is a tuple of cells. Index is 0-based. col_idx is 1-based.
+                     row[col_idx-1].number_format = fmt_money
+
+            # Date
+            if date_col:
+                row[date_col-1].number_format = fmt_date
+
+        # 3. Autofit Columns
+        for column_cells in ws.columns:
+            # We need to calculate length, but be careful with None
+            length = 0
+            for cell in column_cells:
+                val = cell.value
+                if val is not None:
+                    length = max(length, len(str(val)))
+
+            # Add a little buffer
+            adjusted_width = length + 2
+
+            # Simple heuristic adjustment for formatted columns where raw string len might be small
+            col_idx = column_cells[0].column
+
+            if col_idx == qty_col:
+                # 9 decimals + integer part. Safe min width ~15-20?
+                if adjusted_width < 18:
+                    adjusted_width = 18
+
+            if col_idx in money_cols:
+                if adjusted_width < 12:
+                    adjusted_width = 12
+
+            if col_idx == date_col:
+                 if adjusted_width < 20:
+                     adjusted_width = 20
+
+            ws.column_dimensions[get_column_letter(col_idx)].width = adjusted_width
+
+        wb.save(filepath)
+        logger.info(f"Applied Excel formatting to {filepath}")
+
+    except Exception as e:
+        logger.error(f"Failed to apply Excel formatting: {e}")
+
 def apply_signage_rules(row):
     """
     Applies sign enforcement logic.
@@ -393,6 +481,9 @@ def main():
             output_xlsx = OUTPUT_FILE_NAME + '.xlsx'
 
         final_df_xlsx.to_excel(output_xlsx, index=False)
+
+        # Apply Excel Formatting
+        format_excel_file(output_xlsx)
 
         # Summary
         n_coinbase = len(final_df[final_df['EXCHANGE'] == 'Coinbase'])
