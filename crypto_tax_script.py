@@ -222,7 +222,7 @@ def parse_binance(filepath):
 
         df = df.rename(columns=rename_map)
 
-        df['TIME_UTC'] = pd.to_datetime(df['DATE(UTC)'], utc=True)
+        df['TIME_UTC'] = pd.to_datetime(df['DATE(UTC)'], dayfirst=True, utc=True)
 
         df = df.rename(columns={
             'BASE ASSET': 'COIN',
