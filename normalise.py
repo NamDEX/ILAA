@@ -688,8 +688,10 @@ def scan_and_process(config: Dict[str, Any]):
                     stats["success"] += 1
                 elif log_entry["status"] == "unsupported":
                     stats["unsupported"] += 1
+                    print(f"  [Unsupported] {log_entry.get('content', '')}")
                 else:
                     stats["failed"] += 1
+                    print(f"  [FAILED] Errors: {json.dumps(log_entry.get('errors', []))}")
 
                 stats["images_extracted"] += log_entry["images_extracted_count"]
 
