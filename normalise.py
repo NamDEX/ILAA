@@ -9,6 +9,7 @@ import csv
 import io
 import warnings
 import re
+import subprocess
 from typing import List, Dict, Any, Optional, Tuple
 
 # Attempt imports for required libraries
@@ -62,6 +63,39 @@ REQUIRED_CONFIG_KEYS = [
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def ensure_dependencies(config_path: str = CONFIG_FILENAME):
+    # Look for requirements.txt in the same directory as config.json
+    # or current working directory
+    if os.path.exists(config_path):
+        base_dir = os.path.dirname(os.path.abspath(config_path))
+        req_path = os.path.join(base_dir, "requirements.txt")
+    else:
+        req_path = "requirements.txt"
+
+    if not os.path.exists(req_path):
+        return
+
+    # Check if we are missing any core libraries that we tried to import
+    missing = []
+    if fitz is None: missing.append("pymupdf")
+    if docx is None: missing.append("python-docx")
+    if pptx is None: missing.append("python-pptx")
+    if openpyxl is None: missing.append("openpyxl")
+    if pd is None: missing.append("pandas")
+    if open_xlsb is None: missing.append("pyxlsb")
+    if Image is None: missing.append("pillow")
+
+    if missing:
+        print(f"Missing libraries: {', '.join(missing)}. Attempting to install from {req_path}...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_path])
+            print("Dependencies installed. Restarting script...")
+            # Restart the script to load the newly installed modules
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        except Exception as e:
+            print(f"Failed to install dependencies: {e}")
+            print("Proceeding with available libraries...")
 
 def load_config(path: str = CONFIG_FILENAME) -> Dict[str, Any]:
     if not os.path.exists(path):
@@ -768,6 +802,9 @@ def self_test(config: Dict[str, Any]):
     print("Self-test completed successfully.")
 
 if __name__ == "__main__":
+    # Check dependencies before doing anything else
+    ensure_dependencies()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true", help="Run self-test mode")
     args = parser.parse_args()
