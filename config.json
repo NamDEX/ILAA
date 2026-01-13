@@ -1,0 +1,9 @@
+{
+  "input_root": "C:\\Projects Python\\Normalisation\\Input",
+  "output_root": "C:\\Projects Python\\Normalisation\\Normalised Data",
+  "subfolders": ["Questions", "Style guide", "Internal Source files"],
+  "images_folder_name": "images",
+  "log_filename": "processing_log.jsonl",
+  "overwrite": true,
+  "max_table_rows": 2000
+}
