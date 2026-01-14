@@ -4,7 +4,7 @@
   "images_dir": "C:\\Projects Python\\Normalisation\\Normalised Data\\images",
   "output_dir": "C:\\Projects Python\\Normalisation\\Output\\Agent 1",
 
-  "openai_model": "gpt-4o",
+  "openai_model": "gpt-5.2",
   "max_chars_per_chunk": 120000,
 
   "external_research_mandatory": true,
