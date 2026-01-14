@@ -237,27 +237,22 @@ class FileManager:
             f.write(content)
 
     def extract_images(self, text: str) -> List[str]:
-        # Fix 2: Enhanced Image Capture
+        # Fix 3: Enhanced Image Capture with block-scan for brackets and anchored regex for markdown
         images = []
 
-        # A) Bracket format: [[IMAGE: IMG_<id> ...]]
-        # Supports IMG_id anywhere inside bracket, allow underscores
-        bracket_matches = re.findall(r'\[\[IMAGE:\s*(IMG_[a-zA-Z0-9_]+)', text)
-        images.extend(bracket_matches)
+        # A) Bracket format: [[IMAGE: ...]] - extract blocks first, then ID
+        # Matches content between [[IMAGE: and ]] non-greedily
+        bracket_blocks = re.findall(r'\[\[IMAGE:.*?\]\]', text)
+        for block in bracket_blocks:
+            # Capture IMG_... anywhere in the block
+            ids = re.findall(r'(IMG_[a-zA-Z0-9_]+)', block)
+            images.extend(ids)
 
         # B) Markdown format: ![...](path/to/IMG_<id>.ext)
-        # Supports paths, slashes, query strings, case-insensitive extensions
-        # Regex explanation:
-        # !\[.*?\]\(       -> match ![Alt text](
-        # (?:.*?[/\\])?    -> optional path prefix with / or \
-        # (IMG_[a-zA-Z0-9_]+) -> capture ID group 1
-        # \.(?:png|jpg|jpeg|webp) -> extension (case insensitive via flag if possible, or explicit)
-        # We list explicit extensions in upper/lower cases to be safe without regex flags
-
-        # Simpler robust regex for path/extension:
-        # Match (IMG_...).extension inside (...)
-        md_candidates = re.findall(r'\((?:.*?[/\\])?(IMG_[a-zA-Z0-9_]+)\.(?i:png|jpg|jpeg|webp)(?:\?.*?)?\)', text)
-        images.extend(md_candidates)
+        # Anchored to !\[...\]\(
+        # Explicitly support uppercase extensions as per requirement
+        md_matches = re.findall(r'!\[.*?\]\((?:.*?[/\\\\])?(IMG_[a-zA-Z0-9_]+)\.(?:png|jpg|jpeg|webp|PNG|JPG|JPEG|WEBP)(?:\?.*?)?\)', text)
+        images.extend(md_matches)
 
         return sorted(list(set(images)))
 
@@ -268,34 +263,28 @@ class FileManager:
         """
         chunks = []
 
-        # Fix 1: Robust Page Marker Splitting
-        # Matches: --- BEGIN PAGE 12 --- OR --- BEGIN PAGE-12 ---
         split_pattern = r'(---\s*BEGIN\s*PAGE[-\s](\d+)\s*---)'
         parts = re.split(split_pattern, content)
 
         current_page = "1"
         current_text = ""
 
-        # Handle preamble
-        if parts and not re.match(split_pattern, parts[0]):
-            current_text = parts[0]
-            images = self.extract_images(current_text)
-            chunks.append({
-                "file": filename,
-                "page": current_page,
-                "text": current_text.strip(),
-                "images": images
-            })
-            parts = parts[1:]
+        # Fix 1: Only create preamble if content exists (strip empty starts)
+        if parts and not parts[0].startswith('--- BEGIN PAGE'):
+             if parts[0].strip():
+                current_text = parts[0]
+                images = self.extract_images(current_text)
+                chunks.append({
+                    "file": filename,
+                    "page": current_page,
+                    "text": current_text.strip(),
+                    "images": images
+                })
+             parts = parts[1:]
 
         # Iterate parts (marker, full_marker_text, page_num, content, ...)
-        # re.split returns [preamble, full_match1, group1, content1, full_match2, group2, content2...]
-        # Here groups are (full_marker, page_num)
-
-        # Step is 3 because we have 2 capturing groups in split_pattern
         for i in range(0, len(parts), 3):
             if i+2 < len(parts):
-                # marker_full = parts[i] (unused)
                 page_num = parts[i+1]
                 text = parts[i+2]
 
@@ -308,6 +297,7 @@ class FileManager:
                     "images": images
                 })
 
+        # Fallback for no markers but content exists
         if not chunks and content.strip():
              images = self.extract_images(content)
              chunks.append({"file": filename, "page": "1", "text": content, "images": images})
@@ -443,8 +433,22 @@ class Orchestrator:
         for fname, content in internal_files.items():
             chunks = self.file_manager.parse_with_page_markers(fname, content)
 
-            # Fallback trigger refinement
-            if len(chunks) == 1 and len(content) > max_chars:
+            # Fix 2: Marker Presence Guardrail
+            # Check for markers using the same regex pattern
+            marker_pattern = r'---\s*BEGIN\s*PAGE[-\s]\d+\s*---'
+            has_markers = re.search(marker_pattern, content, re.IGNORECASE)
+
+            if has_markers and len(chunks) == 1:
+                # Critical failure: Markers existed but parsing failed to split
+                logger.error(f"Internal Marker Parse Failed: {fname} has markers but yielded only 1 chunk.")
+                self.file_manager.log_run("internal_marker_parse_failed_despite_markers", {
+                    "file": fname, "content_len": len(content)
+                })
+                # Hard fail as requested
+                sys.exit(1)
+
+            # Fallback trigger: No markers AND single chunk AND large content
+            if not has_markers and len(chunks) == 1 and len(content) > max_chars:
                 logger.warning(f"Triggering fallback chunking for {fname} (length {len(content)})")
                 self.file_manager.log_run("internal_marker_parse_fallback", {"file": fname, "original_len": len(content), "original_chunks": 1})
 
@@ -752,8 +756,9 @@ class Orchestrator:
 
     def step_8_answers(self, questions: List[Dict], evidence_map: Dict, synopsis: str) -> Dict:
         answers = {}
-        # Fix 3: Prompt overflow guardrail budget (chars)
-        SAFE_BUDGET = 20000
+        # Fix 4: Deterministic Budget Loop
+        MAX_PROMPT_CHARS = 25000
+        STATIC_OVERHEAD = 2000
 
         for q in questions:
             ev = evidence_map.get(q['id'], {})
@@ -764,7 +769,7 @@ class Orchestrator:
 
             combined_evidence = f"INTERNAL: {internal_str}\nIMAGES: {image_str}\nEXTERNAL: {external_str}"
 
-            # Evidence packing
+            # 1. Initial Packing
             evidence_pack = combined_evidence
             if len(combined_evidence) > 30000:
                 self.file_manager.log_run("step_8a_packing", {"qid": q['id'], "len": len(combined_evidence)})
@@ -778,15 +783,23 @@ class Orchestrator:
                     packed_chunks.append(resp)
                 evidence_pack = "\n".join(packed_chunks)
 
-            # Fix 3: Final Budget Check & Compression
-            total_prompt_len = len(synopsis) + len(q['text']) + len(evidence_pack)
-            if total_prompt_len > SAFE_BUDGET + 5000: # allow some buffer over safe budget before force-compress
-                 self.file_manager.log_run("step_8_budget_overflow", {"qid": q['id'], "before_len": len(evidence_pack)})
-                 evidence_pack = self.llm.call_llm(
-                     system_prompt=PROMPT_PERSONA,
-                     user_content=f"EVIDENCE PACK (Too Large):\n{evidence_pack}\n\nCompress this evidence to under {SAFE_BUDGET} characters. Preserve ALL citations, URLs, and image IDs. Remove only redundancy."
-                 )
-                 self.file_manager.log_run("step_8_budget_compression_complete", {"qid": q['id'], "after_len": len(evidence_pack)})
+            # 2. Deterministic Budget Enforcement
+            evidence_budget = MAX_PROMPT_CHARS - len(synopsis) - len(q['text']) - STATIC_OVERHEAD
+            # Ensure a minimal budget exists even if synopsis is huge
+            if evidence_budget < 5000: evidence_budget = 5000
+
+            if len(evidence_pack) > evidence_budget:
+                self.file_manager.log_run("step_8_budget_enforcement_start", {"qid": q['id'], "len": len(evidence_pack), "budget": evidence_budget})
+
+                for attempt in range(3):
+                    if len(evidence_pack) <= evidence_budget:
+                        break
+
+                    evidence_pack = self.llm.call_llm(
+                        system_prompt=PROMPT_PERSONA,
+                        user_content=f"EVIDENCE PACK (Too Large):\n{evidence_pack}\n\nCompress this evidence to under {evidence_budget} characters. Preserve ALL citations, URLs, and image IDs. Remove only redundancy."
+                    )
+                    self.file_manager.log_run("step_8_budget_compression_pass", {"qid": q['id'], "pass": attempt+1, "len": len(evidence_pack)})
 
             response = self.llm.call_llm(
                 system_prompt=PROMPT_PERSONA,
