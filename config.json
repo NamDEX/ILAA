@@ -1,0 +1,19 @@
+{
+  "internal_sources_dir": "C:\\Projects Python\\Normalisation\\Normalised Data\\Internal Source files",
+  "questions_dir": "C:\\Projects Python\\Normalisation\\Normalised Data\\Questions",
+  "images_dir": "C:\\Projects Python\\Normalisation\\Normalised Data\\images",
+  "output_dir": "C:\\Projects Python\\Normalisation\\Output\\Agent 1",
+
+  "openai_model": "gpt-4o",
+  "max_chars_per_chunk": 120000,
+
+  "external_research_mandatory": true,
+  "max_web_sources_per_question": 6,
+  "download_pdfs": true,
+  "max_pdf_pages": 500,
+  "max_html_chars": 250000,
+
+  "request_timeout_sec": 120,
+  "overwrite": true,
+  "auto_install_dependencies": true
+}

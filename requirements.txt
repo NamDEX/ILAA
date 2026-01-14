@@ -1,0 +1,6 @@
+openai
+requests
+beautifulsoup4
+pymupdf
+googlesearch-python
+tenacity
