@@ -661,7 +661,7 @@ def process_file(source_abs: str, input_root: str, output_root: str, config: Dic
 
 def scan_and_process(config: Dict[str, Any]):
     print(f"Scanning {config['input_root']}...")
-    stats = {"success": 0, "failed": 0}
+    stats = {"success": 0, "partial": 0, "failed": 0, "unsupported": 0}
     for folder in config["subfolders"]:
         path = os.path.join(config["input_root"], folder)
         if not os.path.exists(path): continue
@@ -670,10 +670,20 @@ def scan_and_process(config: Dict[str, Any]):
                 fpath = os.path.join(root, f)
                 print(f"Processing {f}...")
                 res = process_file(fpath, config["input_root"], config["output_root"], config)
-                if res["status"] == "success": stats["success"] += 1
-                else: stats["failed"] += 1
 
-    print(f"Done. Success: {stats['success']}, Failed: {stats['failed']}")
+                if res["status"] == "success":
+                    stats["success"] += 1
+                elif res["status"] == "success_partial":
+                    stats["partial"] += 1
+                    print(f"  [PARTIAL] Quality issues: {json.dumps(res.get('quality_flags'))}")
+                elif res["status"] == "unsupported":
+                    stats["unsupported"] += 1
+                    print(f"  [UNSUPPORTED] {res.get('error') or 'Type not supported'}")
+                else:
+                    stats["failed"] += 1
+                    print(f"  [FAILED] {res.get('error')}")
+
+    print(f"Done. Success: {stats['success']}, Partial: {stats['partial']}, Failed: {stats['failed']}, Unsupported: {stats['unsupported']}")
 
 def self_test(config: Dict[str, Any]):
     print("Running self-test...")
