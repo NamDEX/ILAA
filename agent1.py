@@ -237,20 +237,18 @@ class FileManager:
             f.write(content)
 
     def extract_images(self, text: str) -> List[str]:
-        # Fix 3: Enhanced Image Capture with block-scan for brackets and anchored regex for markdown
+        # Fix 3: Enhanced Image Capture with block-scan (DOTALL) and anchored regex for markdown
         images = []
 
         # A) Bracket format: [[IMAGE: ...]] - extract blocks first, then ID
-        # Matches content between [[IMAGE: and ]] non-greedily
-        bracket_blocks = re.findall(r'\[\[IMAGE:.*?\]\]', text)
+        # Matches content between [[IMAGE: and ]] non-greedily, allowing newlines
+        bracket_blocks = re.findall(r'(?s)\[\[IMAGE:.*?\]\]', text)
         for block in bracket_blocks:
             # Capture IMG_... anywhere in the block
             ids = re.findall(r'(IMG_[a-zA-Z0-9_]+)', block)
             images.extend(ids)
 
         # B) Markdown format: ![...](path/to/IMG_<id>.ext)
-        # Anchored to !\[...\]\(
-        # Explicitly support uppercase extensions as per requirement
         md_matches = re.findall(r'!\[.*?\]\((?:.*?[/\\\\])?(IMG_[a-zA-Z0-9_]+)\.(?:png|jpg|jpeg|webp|PNG|JPG|JPEG|WEBP)(?:\?.*?)?\)', text)
         images.extend(md_matches)
 
@@ -269,7 +267,7 @@ class FileManager:
         current_page = "1"
         current_text = ""
 
-        # Fix 1: Only create preamble if content exists (strip empty starts)
+        # Handle preamble: Only if content exists (strip empty starts)
         if parts and not parts[0].startswith('--- BEGIN PAGE'):
              if parts[0].strip():
                 current_text = parts[0]
@@ -287,6 +285,10 @@ class FileManager:
             if i+2 < len(parts):
                 page_num = parts[i+1]
                 text = parts[i+2]
+
+                # Fix 1: Prevent empty marker chunks
+                if not text.strip():
+                    continue
 
                 current_page = page_num
                 images = self.extract_images(text)
@@ -433,18 +435,17 @@ class Orchestrator:
         for fname, content in internal_files.items():
             chunks = self.file_manager.parse_with_page_markers(fname, content)
 
-            # Fix 2: Marker Presence Guardrail
-            # Check for markers using the same regex pattern
+            # Fix 2: Refined Marker Presence Guardrail (count based)
             marker_pattern = r'---\s*BEGIN\s*PAGE[-\s]\d+\s*---'
-            has_markers = re.search(marker_pattern, content, re.IGNORECASE)
+            marker_count = len(re.findall(marker_pattern, content, flags=re.IGNORECASE))
+            has_markers = marker_count > 0
 
-            if has_markers and len(chunks) == 1:
-                # Critical failure: Markers existed but parsing failed to split
-                logger.error(f"Internal Marker Parse Failed: {fname} has markers but yielded only 1 chunk.")
+            # Only hard fail if significant markers exist but only 1 chunk produced (parse failure)
+            if marker_count > 1 and len(chunks) == 1:
+                logger.error(f"Internal Marker Parse Failed: {fname} has {marker_count} markers but yielded only 1 chunk.")
                 self.file_manager.log_run("internal_marker_parse_failed_despite_markers", {
-                    "file": fname, "content_len": len(content)
+                    "file": fname, "content_len": len(content), "marker_count": marker_count
                 })
-                # Hard fail as requested
                 sys.exit(1)
 
             # Fallback trigger: No markers AND single chunk AND large content
@@ -756,7 +757,7 @@ class Orchestrator:
 
     def step_8_answers(self, questions: List[Dict], evidence_map: Dict, synopsis: str) -> Dict:
         answers = {}
-        # Fix 4: Deterministic Budget Loop
+        # Deterministic Budget Loop
         MAX_PROMPT_CHARS = 25000
         STATIC_OVERHEAD = 2000
 
@@ -800,6 +801,13 @@ class Orchestrator:
                         user_content=f"EVIDENCE PACK (Too Large):\n{evidence_pack}\n\nCompress this evidence to under {evidence_budget} characters. Preserve ALL citations, URLs, and image IDs. Remove only redundancy."
                     )
                     self.file_manager.log_run("step_8_budget_compression_pass", {"qid": q['id'], "pass": attempt+1, "len": len(evidence_pack)})
+
+                # Fix 4: Final hard clamp if still over budget
+                if len(evidence_pack) > evidence_budget:
+                    self.file_manager.log_run("step_8_budget_hard_clamp", {
+                        "qid": q['id'], "len": len(evidence_pack), "budget": evidence_budget
+                    })
+                    evidence_pack = evidence_pack[:evidence_budget]
 
             response = self.llm.call_llm(
                 system_prompt=PROMPT_PERSONA,
