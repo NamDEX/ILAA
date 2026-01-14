@@ -315,7 +315,9 @@ def process_pdf(file_path: str, rel_path: str, config: Dict[str, Any]) -> List[S
             # Skip if overlaps significantly with extracted table
             overlap = False
             for t in tables:
-                if b_rect.intersect(t["rect"]).area > 0.5 * b_rect.area:
+                # Use & for intersection to avoid modifying b_rect in place
+                intersection = b_rect & t["rect"]
+                if intersection.get_area() > 0.5 * b_rect.get_area():
                     overlap = True; break
             if overlap: continue
 
