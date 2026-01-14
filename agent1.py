@@ -99,9 +99,7 @@ try:
     import fitz  # PyMuPDF
     from googlesearch import search as google_search
 except ImportError:
-    # Handle missing dependencies for self-test mode to avoid crashing on definition
     if "--self-test" in sys.argv:
-        # Define dummies so class definitions don't crash
         def retry(*args, **kwargs):
             return lambda f: f
         def stop_after_attempt(*args): return None
@@ -147,14 +145,13 @@ class LLMClient:
         if self.api_key:
             self.client = OpenAI(api_key=self.api_key)
         else:
-            self.client = None # For self-test
+            self.client = None
 
         self.model = config.get("openai_model", "gpt-5.2")
         self.timeout = config.get("request_timeout_sec", 120)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def call_llm(self, system_prompt: str, user_content: str, json_mode=False) -> str:
-        """Calls OpenAI ChatCompletion with retries."""
         if not self.client:
              raise RuntimeError("OpenAI Client not initialized (missing API key?)")
 
@@ -192,7 +189,6 @@ class FileManager:
         path = self.config.internal_sources_dir
         if not path.exists():
             return {}
-        # Recursive glob for internal files
         for p in path.rglob("*.txt"):
             try:
                 rel_path = p.relative_to(path).as_posix()
@@ -206,7 +202,6 @@ class FileManager:
         path = self.config.questions_dir
         if not path.exists():
             return {}
-        # Recursive glob for questions
         for p in path.rglob("*.txt"):
              try:
                 rel_path = p.relative_to(path).as_posix()
@@ -221,7 +216,6 @@ class FileManager:
             json.dump(data, f, indent=2)
         logger.info(f"Saved artifact: {filename}")
 
-    # Fix 2: Add specific method for saving text artifacts
     def save_artifact_text(self, filename: str, content: str):
         path = self.artifacts_dir / filename
         with open(path, 'w', encoding='utf-8') as f:
@@ -242,10 +236,25 @@ class FileManager:
         with open(path, 'w', encoding='utf-8') as f:
             f.write(content)
 
+    def extract_images(self, text: str) -> List[str]:
+        # Fix 1: Support BOTH [[IMAGE: ...]] (with pipes) and Markdown ![](IMG...)
+        images = []
+        # A) Bracket format: [[IMAGE: IMG_<id> | ...]] - capture IMG_<id>
+        # Relaxed regex to capture IMG_... until pipe or closing bracket
+        # Use simple alphanumeric+underscore matching for ID
+        bracket_matches = re.findall(r'\[\[IMAGE:\s*(IMG_[a-zA-Z0-9]+)', text)
+        images.extend(bracket_matches)
+
+        # B) Markdown format: ![...](IMG_<id>.png/jpg/...)
+        md_matches = re.findall(r'!\[.*?\]\((IMG_[a-zA-Z0-9]+)\.(?:png|jpg|jpeg|webp)\)', text)
+        images.extend(md_matches)
+
+        return sorted(list(set(images))) # unique
+
     def parse_with_page_markers(self, filename: str, content: str) -> List[Dict]:
         """
         Splits content by '--- BEGIN PAGE n ---' markers.
-        Returns list of dicts: {'text': ..., 'page': n, 'file': filename}
+        Returns list of dicts: {'text': ..., 'page': n, 'file': filename, 'images': [...]}
         """
         chunks = []
         parts = re.split(r'(--- BEGIN PAGE \d+ ---)', content)
@@ -255,7 +264,7 @@ class FileManager:
 
         if parts and not parts[0].startswith('--- BEGIN PAGE'):
             current_text = parts[0]
-            images = re.findall(r'\[\[IMAGE:\s*(IMG_[a-fA-F0-9]+)\]\]', current_text)
+            images = self.extract_images(current_text)
             chunks.append({
                 "file": filename,
                 "page": current_page,
@@ -270,7 +279,8 @@ class FileManager:
                 text = parts[i+1]
                 m = re.search(r'PAGE (\d+)', marker)
                 if m: current_page = m.group(1)
-                images = re.findall(r'\[\[IMAGE:\s*(IMG_[a-fA-F0-9]+)\]\]', text)
+
+                images = self.extract_images(text)
                 chunks.append({
                     "file": filename,
                     "page": current_page,
@@ -279,7 +289,7 @@ class FileManager:
                 })
 
         if not chunks and content.strip():
-             images = re.findall(r'\[\[IMAGE:\s*(IMG_[a-fA-F0-9]+)\]\]', content)
+             images = self.extract_images(content)
              chunks.append({"file": filename, "page": "1", "text": content, "images": images})
 
         return chunks
@@ -413,23 +423,22 @@ class Orchestrator:
         for fname, content in internal_files.items():
             chunks = self.file_manager.parse_with_page_markers(fname, content)
 
-            # Fix 3: Fallback chunking guardrail
+            # Fix 2: Fallback trigger refinement and provenance protection
             if len(chunks) == 1 and len(content) > max_chars:
                 logger.warning(f"Triggering fallback chunking for {fname} (length {len(content)})")
                 self.file_manager.log_run("internal_marker_parse_fallback", {"file": fname, "original_len": len(content), "original_chunks": 1})
 
-                # Deterministic fallback chunking
-                # Use safe fallback size (e.g. 50k to be safe within context limits)
                 fallback_size = 50000
                 raw_text_chunks = [content[i:i+fallback_size] for i in range(0, len(content), fallback_size)]
 
                 chunks = []
                 for i, rc in enumerate(raw_text_chunks):
-                    # Simple image scan in fallback
-                    images = re.findall(r'\[\[IMAGE:\s*(IMG_[a-fA-F0-9]+)\]\]', rc)
+                    # Fix 1: Image extraction usage
+                    images = self.file_manager.extract_images(rc)
                     chunks.append({
                         "file": fname,
-                        "page": f"Fallback-{i+1}",
+                        "page": "1", # Fix 2: Keep page 1
+                        "chunk_id": f"fallback_{i+1}", # Fix 2: Add chunk_id
                         "text": rc,
                         "images": images
                     })
@@ -545,7 +554,6 @@ class Orchestrator:
         return combined_index
 
     def step_2_synopsis(self, index: Dict) -> str:
-        # Full content ingestion logic
         full_index_str = json.dumps(index)
         chunk_size = 50000
         chunks = [full_index_str[i:i+chunk_size] for i in range(0, len(full_index_str), chunk_size)]
@@ -559,7 +567,6 @@ class Orchestrator:
             synopsis_notes.append(resp)
 
         combined_notes = "\n---\n".join(synopsis_notes)
-        # Fix 2: Save as text artifact
         self.file_manager.save_artifact_text("synopsis_notes.txt", combined_notes)
 
         final_synopsis = self.llm.call_llm(
@@ -595,9 +602,9 @@ class Orchestrator:
                 score = sum(1 for t in q_tokens if t in c['text'].lower())
                 scored.append((score, c))
 
-            # High recall: top 40
+            # Fix 3: Increase recall to top 100
             scored.sort(key=lambda x: x[0], reverse=True)
-            top_chunks = [x[1] for x in scored[:40]]
+            top_chunks = [x[1] for x in scored[:100]]
 
             snippets = ""
             for c in top_chunks:
@@ -657,7 +664,6 @@ class Orchestrator:
                     if res.get('truncated'):
                         self.file_manager.log_run("step_6_truncation", {"url": url})
                     ext_index.append(res)
-        # Fix 1: Use correct variable name ext_index
         self.file_manager.save_artifact("external_sources_index.json", ext_index)
         return ext_index
 
@@ -670,7 +676,6 @@ class Orchestrator:
             qid = q['id']
             if qid not in grouped: continue
 
-            # Staged ingestion for external text
             all_evidence = []
 
             for d in grouped[qid]:
@@ -702,12 +707,10 @@ class Orchestrator:
                         except: pass
                 except: pass
 
-            # Fix 4: Deterministic deduplication
             before_count = len(all_evidence)
             deduped = []
             seen_keys = set()
             for ev in all_evidence:
-                # Key: url + normalized what_it_supports + start of excerpt
                 support_key = str(ev.get('what_it_supports', '')).strip().lower()
                 excerpt_key = str(ev.get('text_excerpt', ''))[:200].strip().lower()
                 unique_key = (ev.get('url'), support_key, excerpt_key)
@@ -737,13 +740,29 @@ class Orchestrator:
             external_str = json.dumps(ev.get('external_evidence', []))
             image_str = json.dumps(ev.get('image_evidence', []))
 
+            combined_evidence = f"INTERNAL: {internal_str}\nIMAGES: {image_str}\nEXTERNAL: {external_str}"
+
+            # Fix 4: Staged evidence packing if too large
+            evidence_pack = combined_evidence
+            if len(combined_evidence) > 30000:
+                self.file_manager.log_run("step_8a_packing", {"qid": q['id'], "len": len(combined_evidence)})
+
+                # Chunk the raw evidence lists to consolidate
+                chunks = [combined_evidence[i:i+20000] for i in range(0, len(combined_evidence), 20000)]
+                packed_chunks = []
+                for i, c in enumerate(chunks):
+                    resp = self.llm.call_llm(
+                        system_prompt=PROMPT_PERSONA,
+                        user_content=f"EVIDENCE CHUNK ({i+1}/{len(chunks)}):\n{c}\n\nConsolidate this evidence into an answer-ready format. Preserve all citations, URLs, and specific details. Remove redundancy."
+                    )
+                    packed_chunks.append(resp)
+                evidence_pack = "\n".join(packed_chunks)
+
             response = self.llm.call_llm(
                 system_prompt=PROMPT_PERSONA,
                 user_content=f"""SYNOPSIS: {synopsis}
                 Q: {q['text']}
-                INTERNAL TEXT EVIDENCE: {internal_str}
-                INTERNAL IMAGE EVIDENCE: {image_str}
-                EXTERNAL EVIDENCE: {external_str}
+                EVIDENCE PACK: {evidence_pack}
 
                 Write academic answer. Cite images as [IMAGE: IMG_xxx]. Cite text as [internal: file p.x] or [external: url].
                 """
