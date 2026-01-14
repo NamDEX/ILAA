@@ -216,7 +216,7 @@ def analyze_image(image_bytes: bytes, width: int, height: int, nearby_text: str,
             except Exception:
                 ocr_status = "failed"
         else:
-            ocr_status = "failed" # missing library counts as failed for requirement "Explicitly record"
+            ocr_status = "lib_missing"
 
     return {
         "type": img_type,
@@ -271,6 +271,18 @@ def get_metadata_header(source_path: str, source_relpath: str, source_type: str,
 # Processors
 # ---------------------------------------------------------------------------
 
+def get_block_style(page, bbox: fitz.Rect) -> float:
+    try:
+        text_dict = page.get_text("dict", clip=bbox)
+        max_size = 0
+        for b in text_dict.get("blocks", []):
+            for l in b.get("lines", []):
+                for s in l.get("spans", []):
+                    if s["size"] > max_size: max_size = s["size"]
+        return max_size
+    except:
+        return 0
+
 def process_pdf(file_path: str, rel_path: str, config: Dict[str, Any]) -> List[SemanticUnit]:
     if not fitz: raise ImportError("PyMuPDF missing")
     doc = fitz.open(file_path)
@@ -303,36 +315,31 @@ def process_pdf(file_path: str, rel_path: str, config: Dict[str, Any]) -> List[S
                     tables.append({"rect": bbox, "unit": unit})
                     page_units_with_pos.append((bbox.y0, unit))
             except Exception as e:
-                pass # Fallback to text
+                pass
 
-        # 2. Extract Text & Images
-        text_dict = page.get_text("dict")
-        blocks = text_dict.get("blocks", [])
+        # 2. Extract Text (via blocks)
+        # blocks: (x0, y0, x1, y1, text, block_no, block_type)
+        blocks = page.get_text("blocks")
 
         for b in blocks:
-            b_rect = fitz.Rect(b["bbox"])
+            b_rect = fitz.Rect(b[0], b[1], b[2], b[3])
 
             # Skip if overlaps significantly with extracted table
             overlap = False
             for t in tables:
-                # Use & for intersection to avoid modifying b_rect in place
                 intersection = b_rect & t["rect"]
-                if intersection.get_area() > 0.5 * b_rect.get_area():
+                if intersection.get_area() > 0.9 * b_rect.get_area():
                     overlap = True; break
             if overlap: continue
 
-            if b["type"] == 0: # Text
-                block_text = ""
-                role = "body"
-                max_size = 0
-                for line in b["lines"]:
-                    for span in line["spans"]:
-                        block_text += span["text"] + " "
-                        if span["size"] > max_size: max_size = span["size"]
-
-                block_text = clean_text(block_text)
+            if b[6] == 0: # Text
+                block_text = clean_text(b[4])
                 if not block_text: continue
 
+                # Check semantics via dict clip
+                max_size = get_block_style(page, b_rect)
+
+                role = "body"
                 if max_size > 14: role = "heading"
                 elif "?" in block_text and len(block_text) < 200: role = "question"
 
@@ -340,20 +347,35 @@ def process_pdf(file_path: str, rel_path: str, config: Dict[str, Any]) -> List[S
                                     text_type=role, hierarchy_level=1 if role=="heading" else 2)
                 page_units_with_pos.append((b_rect.y0, unit))
 
-            elif b["type"] == 1: # Image
-                image_bytes = b["image"]
-                ext = b["ext"]
-                w, h = b["width"], b["height"]
+        # 3. Handle Images separately
+        image_list = page.get_images(full=True)
+        for img_idx, img in enumerate(image_list):
+            xref = img[0]
+            try:
+                rects = page.get_image_rects(xref)
+                for rect in rects:
+                    # Check overlap with tables
+                    overlap = False
+                    for t in tables:
+                        intersection = rect & t["rect"]
+                        if intersection.get_area() > 0.9 * rect.get_area():
+                            overlap = True; break
+                    if overlap: continue
 
-                # Context heuristic weaker here as units are not sorted yet
-                context = ""
+                    # Extract
+                    base_image = doc.extract_image(xref)
+                    image_bytes = base_image["image"]
+                    ext = base_image["ext"]
+                    w, h = get_image_dimensions(image_bytes)
+                    if w == 0: w, h = int(rect.width), int(rect.height)
 
-                analysis = analyze_image(image_bytes, w, h, context, os.path.basename(file_path), config)
-                unique_id = get_unique_id(rel_path, loc, len(units) + len(page_units_with_pos))
-                save_image(image_bytes, ext, unique_id, config)
+                    analysis = analyze_image(image_bytes, w, h, "", os.path.basename(file_path), config)
+                    unique_id = get_unique_id(rel_path, loc, len(units) + len(page_units_with_pos))
+                    save_image(image_bytes, ext, unique_id, config)
 
-                unit = SemanticUnit("image", {"filename": f"IMG_{unique_id}.{ext}"}, loc, rel_path, len(units) + len(page_units_with_pos), **analysis)
-                page_units_with_pos.append((b_rect.y0, unit))
+                    unit = SemanticUnit("image", {"filename": f"IMG_{unique_id}.{ext}"}, loc, rel_path, len(units) + len(page_units_with_pos), **analysis)
+                    page_units_with_pos.append((rect.y0, unit))
+            except: pass
 
         # Sort page units by vertical position
         page_units_with_pos.sort(key=lambda x: x[0])
