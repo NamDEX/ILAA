@@ -206,7 +206,7 @@ class FileManager:
         path = self.config.questions_dir
         if not path.exists():
             return {}
-        # Recursive glob for questions (FIX A1)
+        # Recursive glob for questions
         for p in path.rglob("*.txt"):
              try:
                 rel_path = p.relative_to(path).as_posix()
@@ -220,6 +220,13 @@ class FileManager:
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
         logger.info(f"Saved artifact: {filename}")
+
+    # Fix 2: Add specific method for saving text artifacts
+    def save_artifact_text(self, filename: str, content: str):
+        path = self.artifacts_dir / filename
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        logger.info(f"Saved text artifact: {filename}")
 
     def log_run(self, step: str, details: Dict):
         entry = {
@@ -401,8 +408,33 @@ class Orchestrator:
         logger.info("STEP 1: Internal Ingestion & Memory Creation")
         internal_files = self.file_manager.read_internal_files()
         all_chunks = []
+        max_chars = self.config_manager.get("max_chars_per_chunk", 120000)
+
         for fname, content in internal_files.items():
             chunks = self.file_manager.parse_with_page_markers(fname, content)
+
+            # Fix 3: Fallback chunking guardrail
+            if len(chunks) == 1 and len(content) > max_chars:
+                logger.warning(f"Triggering fallback chunking for {fname} (length {len(content)})")
+                self.file_manager.log_run("internal_marker_parse_fallback", {"file": fname, "original_len": len(content), "original_chunks": 1})
+
+                # Deterministic fallback chunking
+                # Use safe fallback size (e.g. 50k to be safe within context limits)
+                fallback_size = 50000
+                raw_text_chunks = [content[i:i+fallback_size] for i in range(0, len(content), fallback_size)]
+
+                chunks = []
+                for i, rc in enumerate(raw_text_chunks):
+                    # Simple image scan in fallback
+                    images = re.findall(r'\[\[IMAGE:\s*(IMG_[a-fA-F0-9]+)\]\]', rc)
+                    chunks.append({
+                        "file": fname,
+                        "page": f"Fallback-{i+1}",
+                        "text": rc,
+                        "images": images
+                    })
+                self.file_manager.log_run("internal_marker_parse_fallback_complete", {"file": fname, "new_chunk_count": len(chunks)})
+
             all_chunks.extend(chunks)
 
         internal_index = self.step_1_ingest(all_chunks)
@@ -513,7 +545,7 @@ class Orchestrator:
         return combined_index
 
     def step_2_synopsis(self, index: Dict) -> str:
-        # Full content ingestion logic (Fix B2)
+        # Full content ingestion logic
         full_index_str = json.dumps(index)
         chunk_size = 50000
         chunks = [full_index_str[i:i+chunk_size] for i in range(0, len(full_index_str), chunk_size)]
@@ -527,7 +559,8 @@ class Orchestrator:
             synopsis_notes.append(resp)
 
         combined_notes = "\n---\n".join(synopsis_notes)
-        self.file_manager.save_artifact("synopsis_notes.txt", combined_notes)
+        # Fix 2: Save as text artifact
+        self.file_manager.save_artifact_text("synopsis_notes.txt", combined_notes)
 
         final_synopsis = self.llm.call_llm(
             system_prompt=PROMPT_PERSONA,
@@ -562,7 +595,7 @@ class Orchestrator:
                 score = sum(1 for t in q_tokens if t in c['text'].lower())
                 scored.append((score, c))
 
-            # High recall: top 40 (Fix B4)
+            # High recall: top 40
             scored.sort(key=lambda x: x[0], reverse=True)
             top_chunks = [x[1] for x in scored[:40]]
 
@@ -624,7 +657,8 @@ class Orchestrator:
                     if res.get('truncated'):
                         self.file_manager.log_run("step_6_truncation", {"url": url})
                     ext_index.append(res)
-        self.file_manager.save_artifact("external_sources_index.json", external_index)
+        # Fix 1: Use correct variable name ext_index
+        self.file_manager.save_artifact("external_sources_index.json", ext_index)
         return ext_index
 
     def step_7_external_mapping(self, external_index: List[Dict], questions: List[Dict], evidence_map: Dict) -> Dict:
@@ -636,7 +670,7 @@ class Orchestrator:
             qid = q['id']
             if qid not in grouped: continue
 
-            # Staged ingestion for external text (Fix B3)
+            # Staged ingestion for external text
             all_evidence = []
 
             for d in grouped[qid]:
@@ -644,7 +678,6 @@ class Orchestrator:
                     with open(d['extracted_text_path'], encoding='utf-8') as f:
                         full_text = f.read()
 
-                    # Chunk full text
                     chunk_size = 15000
                     text_chunks = [full_text[i:i+chunk_size] for i in range(0, len(full_text), chunk_size)]
 
@@ -662,7 +695,6 @@ class Orchestrator:
                         )
                         try:
                             items = json.loads(response).get('external_evidence', [])
-                            # Ensure URL/Date present if LLM missed them
                             for it in items:
                                 if 'url' not in it: it['url'] = d['url']
                                 if 'access_date' not in it: it['access_date'] = d['access_date']
@@ -670,8 +702,28 @@ class Orchestrator:
                         except: pass
                 except: pass
 
+            # Fix 4: Deterministic deduplication
+            before_count = len(all_evidence)
+            deduped = []
+            seen_keys = set()
+            for ev in all_evidence:
+                # Key: url + normalized what_it_supports + start of excerpt
+                support_key = str(ev.get('what_it_supports', '')).strip().lower()
+                excerpt_key = str(ev.get('text_excerpt', ''))[:200].strip().lower()
+                unique_key = (ev.get('url'), support_key, excerpt_key)
+
+                if unique_key not in seen_keys:
+                    seen_keys.add(unique_key)
+                    deduped.append(ev)
+
+            after_count = len(deduped)
+            if before_count != after_count:
+                self.file_manager.log_run("external_evidence_dedup", {
+                    "qid": qid, "before": before_count, "after": after_count
+                })
+
             if qid in evidence_map:
-                evidence_map[qid]['external_evidence'] = all_evidence
+                evidence_map[qid]['external_evidence'] = deduped
 
         self.file_manager.save_artifact("evidence_map.json", evidence_map)
         return evidence_map
@@ -713,29 +765,25 @@ class Orchestrator:
         lines = ["=== SYNOPSIS ===", synopsis, "\n=== QUESTIONS & ANSWERS ==="]
         trace_lines = ["question_id | source_type | source | location | what_it_supports"]
 
-        # Helper to get Q text
         q_map = {q['id']: q['text'] for q in questions}
 
         for qid in sorted(answers.keys()):
             lines.extend([f"\n--- QUESTION {qid} ---"])
-            lines.append(q_map.get(qid, "Unknown Question")) # Fix C6
+            lines.append(q_map.get(qid, "Unknown Question"))
             lines.extend([f"--- ANSWER {qid} ---", answers[qid]])
 
             ev = evidence_map.get(qid, {})
 
-            # Internal Text
             for i in ev.get('internal_evidence', []):
                 loc = f"Page {i.get('page', '?')}"
                 supp = i.get('what_it_supports', 'Evidence')
                 trace_lines.append(f"{qid} | internal | {i.get('source')} | {loc} | {supp}")
 
-            # Internal Images
             for i in ev.get('image_evidence', []):
                 loc = f"Page {i.get('page', '?')}"
                 supp = i.get('reason', 'Image Evidence')
                 trace_lines.append(f"{qid} | image | {i.get('image_id')} | {loc} | {supp}")
 
-            # External
             for i in ev.get('external_evidence', []):
                 loc = i.get('access_date', 'Unknown Date')
                 supp = i.get('what_it_supports', 'Evidence')
