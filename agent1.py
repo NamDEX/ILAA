@@ -86,7 +86,6 @@ def ensure_dependencies(config_path="config.json", self_test=False):
             sys.exit(1)
 
 # Perform check BEFORE importing external modules
-# We need to parse args briefly to check for --self-test before main execution
 if __name__ == "__main__":
     is_self_test = "--self-test" in sys.argv
     ensure_dependencies(self_test=is_self_test)
@@ -107,10 +106,7 @@ except ImportError:
             return lambda f: f
         def stop_after_attempt(*args): return None
         def wait_exponential(*args, **kwargs): return None
-        # Mock other modules if strictly needed, but Python is dynamic so generally fine unless used at top-level
-        # Only decorators like @retry are evaluated at definition time.
     else:
-        # Should have been handled by ensure_dependencies
         logger.error("Dependencies missing and not in self-test mode.")
         sys.exit(1)
 
@@ -196,10 +192,9 @@ class FileManager:
         path = self.config.internal_sources_dir
         if not path.exists():
             return {}
-        # Recursive glob
+        # Recursive glob for internal files
         for p in path.rglob("*.txt"):
             try:
-                # Use relative path for provenance
                 rel_path = p.relative_to(path).as_posix()
                 files[rel_path] = p.read_text(encoding='utf-8', errors='replace')
             except Exception as e:
@@ -211,9 +206,11 @@ class FileManager:
         path = self.config.questions_dir
         if not path.exists():
             return {}
-        for p in path.glob("*.txt"):
+        # Recursive glob for questions (FIX A1)
+        for p in path.rglob("*.txt"):
              try:
-                files[p.name] = p.read_text(encoding='utf-8', errors='replace')
+                rel_path = p.relative_to(path).as_posix()
+                files[rel_path] = p.read_text(encoding='utf-8', errors='replace')
              except Exception as e:
                 logger.warning(f"Could not read {p}: {e}")
         return files
@@ -242,21 +239,15 @@ class FileManager:
         """
         Splits content by '--- BEGIN PAGE n ---' markers.
         Returns list of dicts: {'text': ..., 'page': n, 'file': filename}
-        If no markers, treats as Page 1.
         """
         chunks = []
-        # Regex to find markers
-        # Assumes format: --- BEGIN PAGE 1 ---
-        # We split keeping the delimiter to parse it
         parts = re.split(r'(--- BEGIN PAGE \d+ ---)', content)
 
         current_page = "1"
         current_text = ""
 
-        # If the file doesn't start with a marker, the first chunk is Page 1 (or 0, but let's say 1)
         if parts and not parts[0].startswith('--- BEGIN PAGE'):
             current_text = parts[0]
-            # Check for images in this preamble
             images = re.findall(r'\[\[IMAGE:\s*(IMG_[a-fA-F0-9]+)\]\]', current_text)
             chunks.append({
                 "file": filename,
@@ -270,12 +261,8 @@ class FileManager:
             if i+1 < len(parts):
                 marker = parts[i]
                 text = parts[i+1]
-
-                # Extract page number
                 m = re.search(r'PAGE (\d+)', marker)
-                if m:
-                    current_page = m.group(1)
-
+                if m: current_page = m.group(1)
                 images = re.findall(r'\[\[IMAGE:\s*(IMG_[a-fA-F0-9]+)\]\]', text)
                 chunks.append({
                     "file": filename,
@@ -285,7 +272,6 @@ class FileManager:
                 })
 
         if not chunks and content.strip():
-             # Fallback if regex failed but content exists
              images = re.findall(r'\[\[IMAGE:\s*(IMG_[a-fA-F0-9]+)\]\]', content)
              chunks.append({"file": filename, "page": "1", "text": content, "images": images})
 
@@ -349,16 +335,14 @@ class WebResearcher:
                 soup = BeautifulSoup(response.text, 'html.parser')
                 result["title"] = soup.title.string if soup.title else "No Title"
 
-                # Strip scripts and styles
                 for element in soup(["script", "style", "nav", "footer", "header"]):
                     element.decompose()
 
-                # Remove comments
                 for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
                     comment.extract()
 
                 text = soup.get_text(separator='\n')
-                text = re.sub(r'\n\s*\n', '\n\n', text).strip() # clean whitespace
+                text = re.sub(r'\n\s*\n', '\n\n', text).strip()
 
                 if len(text) > self.max_html_chars:
                     text = text[:self.max_html_chars] + "\n\n[TRUNCATED]"
@@ -405,7 +389,6 @@ class Orchestrator:
     def __init__(self):
         self.config_manager = ConfigManager()
         self.file_manager = FileManager(self.config_manager)
-        # LLM initialized later or checked
         if "--self-test" not in sys.argv:
              self.llm = LLMClient(self.config_manager.config)
              self.web = WebResearcher(self.config_manager)
@@ -417,8 +400,6 @@ class Orchestrator:
         # STEP 1
         logger.info("STEP 1: Internal Ingestion & Memory Creation")
         internal_files = self.file_manager.read_internal_files()
-
-        # Process into page-aware chunks
         all_chunks = []
         for fname, content in internal_files.items():
             chunks = self.file_manager.parse_with_page_markers(fname, content)
@@ -473,7 +454,7 @@ class Orchestrator:
 
         # STEP 10
         logger.info("STEP 10: Output Generation")
-        self.step_10_output(synopsis, final_answers, evidence_map)
+        self.step_10_output(synopsis, final_answers, evidence_map, questions_struct)
         self.file_manager.log_run("step_10", {"duration": time.time() - start_time})
 
         logger.info("Agent 1 Pipeline Complete.")
@@ -483,8 +464,6 @@ class Orchestrator:
             "definitions": [], "theories": [], "formulas": [],
             "examples": [], "image_markers": [], "provenance": []
         }
-
-        # Track unique files for provenance list
         files_seen = set()
 
         prompt_tmpl = PROMPT_PERSONA + """
@@ -502,9 +481,6 @@ class Orchestrator:
             imgs = c['images']
             files_seen.add(fname)
 
-            # If text is very long, might need sub-chunking, but let's assume page-sized chunks are okay for index
-            # If > max_chars, we truncate or split. Config says 120k chars per chunk for LLM, usually page is smaller.
-
             response_str = self.llm.call_llm(
                 system_prompt="Indexing engine. JSON only.",
                 user_content=prompt_tmpl.format(filename=fname, page=page, images=imgs) + f"\n\nTEXT:\n{text}",
@@ -519,13 +495,8 @@ class Orchestrator:
                             item['source'] = fname
                             item['page'] = page
                             combined_index[key].append(item)
-
-                # Handle Images
-                # We want to store image markers with context
-                # The chunks already have the IDs. The LLM gives context.
                 if imgs:
                     img_contexts = data.get("images_context", [])
-                    # Map loosely by index or just dump
                     for i, img_id in enumerate(imgs):
                         ctx = img_contexts[i] if i < len(img_contexts) else "No context extracted"
                         combined_index["image_markers"].append({
@@ -534,7 +505,6 @@ class Orchestrator:
                             "page": page,
                             "context": ctx
                         })
-
             except Exception as e:
                 logger.warning(f"Index error {fname} p{page}: {e}")
 
@@ -543,14 +513,27 @@ class Orchestrator:
         return combined_index
 
     def step_2_synopsis(self, index: Dict) -> str:
-        # Simplified index for synopsis
-        short_index = {k: len(v) for k,v in index.items() if k!="provenance"}
-        short_index["topics"] = [x['text'][:50] for x in index['definitions'][:20]] # sample
+        # Full content ingestion logic (Fix B2)
+        full_index_str = json.dumps(index)
+        chunk_size = 50000
+        chunks = [full_index_str[i:i+chunk_size] for i in range(0, len(full_index_str), chunk_size)]
 
-        return self.llm.call_llm(
+        synopsis_notes = []
+        for i, chunk in enumerate(chunks):
+            resp = self.llm.call_llm(
+                system_prompt=PROMPT_PERSONA,
+                user_content=f"PARTIAL INDEX ({i+1}/{len(chunks)}):\n{chunk}\n\nDraft detailed synopsis notes for this part. Focus on themes, theories, and scope."
+            )
+            synopsis_notes.append(resp)
+
+        combined_notes = "\n---\n".join(synopsis_notes)
+        self.file_manager.save_artifact("synopsis_notes.txt", combined_notes)
+
+        final_synopsis = self.llm.call_llm(
             system_prompt=PROMPT_PERSONA,
-            user_content=f"INTERNAL INDEX STATS:\n{json.dumps(short_index)}\n\nWrite a comprehensive Synopsis of the material."
+            user_content=f"ALL SYNOPSIS NOTES:\n{combined_notes}\n\nWrite a single, comprehensive, cohesive Synopsis of the material."
         )
+        return final_synopsis
 
     def step_3_questions(self, raw_files: Dict[str, str]) -> List[Dict]:
         questions_text = "\n".join([f"--- FILE: {k} ---\n{v}" for k, v in raw_files.items()])
@@ -570,22 +553,18 @@ class Orchestrator:
     def step_4_internal_mapping(self, all_chunks: List[Dict], questions: List[Dict], index: Dict) -> Dict:
         evidence_map = {q['id']: {"internal_evidence": [], "external_evidence": [], "image_evidence": [], "analysis": ""} for q in questions}
 
-        # Prepare chunks for retrieval (simple keyword overlap)
-        # We need to sub-chunk large pages if needed, but for now we search page-level
-
         for q in questions:
             q_text = (q['text'] + " " + " ".join(q.get('subparts', []))).lower()
             q_tokens = set(q_text.split())
 
             scored = []
             for c in all_chunks:
-                # Simple score
                 score = sum(1 for t in q_tokens if t in c['text'].lower())
                 scored.append((score, c))
 
-            # Top 5 pages
+            # High recall: top 40 (Fix B4)
             scored.sort(key=lambda x: x[0], reverse=True)
-            top_chunks = [x[1] for x in scored[:5]]
+            top_chunks = [x[1] for x in scored[:40]]
 
             snippets = ""
             for c in top_chunks:
@@ -642,8 +621,10 @@ class Orchestrator:
                     logger.info(f"Downloading {url}")
                     res = self.web.download_and_extract(url, self.file_manager.external_dir)
                     res['question_id_target'] = item['question_id']
+                    if res.get('truncated'):
+                        self.file_manager.log_run("step_6_truncation", {"url": url})
                     ext_index.append(res)
-        self.file_manager.save_artifact("external_sources_index.json", ext_index)
+        self.file_manager.save_artifact("external_sources_index.json", external_index)
         return ext_index
 
     def step_7_external_mapping(self, external_index: List[Dict], questions: List[Dict], evidence_map: Dict) -> Dict:
@@ -654,28 +635,44 @@ class Orchestrator:
         for q in questions:
             qid = q['id']
             if qid not in grouped: continue
-            text_context = ""
+
+            # Staged ingestion for external text (Fix B3)
+            all_evidence = []
+
             for d in grouped[qid]:
                 try:
                     with open(d['extracted_text_path'], encoding='utf-8') as f:
-                        content = f.read()[:10000] # Limit context
-                    text_context += f"\nSource: {d['url']}\nAccess Date: {d['access_date']}\n{content}\n"
+                        full_text = f.read()
+
+                    # Chunk full text
+                    chunk_size = 15000
+                    text_chunks = [full_text[i:i+chunk_size] for i in range(0, len(full_text), chunk_size)]
+
+                    for i, chunk in enumerate(text_chunks):
+                        prompt = PROMPT_PERSONA + """
+                        Analyze EXTERNAL text chunk. Extract evidence.
+                        Return JSON: {"external_evidence": [{"url": "...", "access_date": "...", "text_excerpt": "...", "what_it_supports": "..."}]}
+                        """
+                        context = f"Source: {d['url']}\nAccess Date: {d['access_date']}\nChunk {i+1}/{len(text_chunks)}\n{chunk}"
+
+                        response = self.llm.call_llm(
+                            system_prompt="Evidence Mapper. JSON only.",
+                            user_content=f"Q: {q['text']}\nTEXT:\n{context}\n\n{prompt}",
+                            json_mode=True
+                        )
+                        try:
+                            items = json.loads(response).get('external_evidence', [])
+                            # Ensure URL/Date present if LLM missed them
+                            for it in items:
+                                if 'url' not in it: it['url'] = d['url']
+                                if 'access_date' not in it: it['access_date'] = d['access_date']
+                            all_evidence.extend(items)
+                        except: pass
                 except: pass
 
-            prompt = PROMPT_PERSONA + """
-            Analyze EXTERNAL text. Extract evidence.
-            Return JSON: {"external_evidence": [{"url": "...", "access_date": "...", "text_excerpt": "...", "what_it_supports": "..."}]}
-            """
+            if qid in evidence_map:
+                evidence_map[qid]['external_evidence'] = all_evidence
 
-            response = self.llm.call_llm(
-                system_prompt="Evidence Mapper. JSON only.",
-                user_content=f"Q: {q['text']}\nTEXT:\n{text_context}\n\n{prompt}",
-                json_mode=True
-            )
-            try:
-                if qid in evidence_map:
-                    evidence_map[qid]['external_evidence'] = json.loads(response).get('external_evidence', [])
-            except: pass
         self.file_manager.save_artifact("evidence_map.json", evidence_map)
         return evidence_map
 
@@ -684,7 +681,6 @@ class Orchestrator:
         for q in questions:
             ev = evidence_map.get(q['id'], {})
 
-            # Format evidence for prompt
             internal_str = json.dumps(ev.get('internal_evidence', []))
             external_str = json.dumps(ev.get('external_evidence', []))
             image_str = json.dumps(ev.get('image_evidence', []))
@@ -713,31 +709,37 @@ class Orchestrator:
             if "PASS" not in resp[:10]: answers[qid] = resp
         return answers
 
-    def step_10_output(self, synopsis: str, answers: Dict, evidence_map: Dict):
+    def step_10_output(self, synopsis: str, answers: Dict, evidence_map: Dict, questions: List[Dict]):
         lines = ["=== SYNOPSIS ===", synopsis, "\n=== QUESTIONS & ANSWERS ==="]
-        trace_lines = ["source_type | source | location | what_it_supports"]
+        trace_lines = ["question_id | source_type | source | location | what_it_supports"]
+
+        # Helper to get Q text
+        q_map = {q['id']: q['text'] for q in questions}
 
         for qid in sorted(answers.keys()):
-            lines.extend([f"\n--- QUESTION {qid} ---", f"--- ANSWER {qid} ---", answers[qid]])
+            lines.extend([f"\n--- QUESTION {qid} ---"])
+            lines.append(q_map.get(qid, "Unknown Question")) # Fix C6
+            lines.extend([f"--- ANSWER {qid} ---", answers[qid]])
+
             ev = evidence_map.get(qid, {})
 
             # Internal Text
             for i in ev.get('internal_evidence', []):
                 loc = f"Page {i.get('page', '?')}"
                 supp = i.get('what_it_supports', 'Evidence')
-                trace_lines.append(f"internal | {i.get('source')} | {loc} | {supp}")
+                trace_lines.append(f"{qid} | internal | {i.get('source')} | {loc} | {supp}")
 
             # Internal Images
             for i in ev.get('image_evidence', []):
                 loc = f"Page {i.get('page', '?')}"
                 supp = i.get('reason', 'Image Evidence')
-                trace_lines.append(f"image | {i.get('image_id')} | {loc} | {supp}")
+                trace_lines.append(f"{qid} | image | {i.get('image_id')} | {loc} | {supp}")
 
             # External
             for i in ev.get('external_evidence', []):
                 loc = i.get('access_date', 'Unknown Date')
                 supp = i.get('what_it_supports', 'Evidence')
-                trace_lines.append(f"external | {i.get('url')} | {loc} | {supp}")
+                trace_lines.append(f"{qid} | external | {i.get('url')} | {loc} | {supp}")
 
         self.file_manager.save_text("report.txt", "\n".join(lines))
         self.file_manager.save_text("citations_trace.txt", "\n".join(trace_lines))
