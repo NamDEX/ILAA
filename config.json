@@ -1,0 +1,19 @@
+{
+  "input_root": "C:\\Projects Python\\Normalisation\\Input",
+  "output_root": "C:\\Projects Python\\Normalisation\\Normalised Data",
+  "subfolders": ["Questions", "Style guide", "Internal Source files"],
+  "images_folder_name": "images",
+  "log_filename": "processing_log.jsonl",
+  "overwrite": true,
+  "max_table_rows": 2000,
+  "image_classification": {
+    "min_width": 100,
+    "min_height": 100,
+    "keywords": {
+      "data_chart": ["chart", "graph", "plot", "trend", "statistics", "figure", "forecast", "projection", "axis"],
+      "data_table": ["table", "grid", "summary", "matrix"],
+      "conceptual_diagram": ["diagram", "model", "framework", "process", "cycle", "structure", "flow", "hierarchy"],
+      "formula": ["formula", "equation", "math", "theorem"]
+    }
+  }
+}
