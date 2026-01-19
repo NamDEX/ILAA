@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Results</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div>
+        <h1>Results</h1>
+        <p class="subtitle">{{ mode_title }}</p>
+      </div>
+    </header>
+
+    <div class="card">
+      <h2>Score</h2>
+      <div class="score">{{ score }} / {{ total }}</div>
+      <div class="muted">
+        {% if timer_enabled %}Timed set{% else %}Untimed set{% endif %}
+        · Completed at {{ finished_at }}
+      </div>
+
+      <div class="actions">
+        <a class="btn secondary" href="{{ url_for('index') }}">New set</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Answer script</h2>
+      {% for row in script %}
+        <div class="script-row">
+          <div class="script-q">Q{{ loop.index }}.</div>
+          <div class="script-stem">{{ row.stem }}</div>
+          <div class="script-ans">
+            <span class="pill {% if row.is_correct %}ok{% else %}bad{% endif %}">
+              Your: {{ row.selected or "Skipped" }} · Correct: {{ row.correct }}
+            </span>
+            {% if row.diagnostic and not row.is_correct %}
+              <span class="pill warn">Code: {{ row.diagnostic }}</span>
+              <!-- Feature 5: Show meaning inline -->
+              {% if row.diagnostic_text %}
+                 <div style="margin-top:4px; font-size:13px; color:var(--warn);">Meaning: {{ row.diagnostic_text }}</div>
+              {% endif %}
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="card">
+      <h2>Analytics (quick)</h2>
+      <div class="grid">
+        <div>
+          <h3>Weak topics (this set)</h3>
+          {% if weak_topics %}
+            <ul>
+              {% for t, n in weak_topics %}
+                <li>{{ t }}: {{ n }} incorrect</li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="muted">No weak topics detected in this set.</div>
+          {% endif %}
+        </div>
+        <div>
+          <h3>Top misconception codes</h3>
+          {% if top_codes %}
+            <ul>
+              {% for c, n in top_codes %}
+                <li>{{ c }}: {{ n }}</li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="muted">No misconception codes recorded.</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Feature 5: Legend -->
+      {% if legend_items %}
+      <div style="margin-top:20px; padding-top:12px; border-top:1px solid var(--border);">
+         <h3>Legend</h3>
+         <ul style="font-size:14px; color:var(--muted);">
+           {% for code, text in legend_items %}
+             <li><strong>{{ code }}</strong>: {{ text }}</li>
+           {% endfor %}
+         </ul>
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+</body>
+</html>
