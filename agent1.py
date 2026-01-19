@@ -1,0 +1,914 @@
+import os
+import sys
+import json
+import time
+import logging
+import argparse
+import subprocess
+import glob
+import re
+import math
+from pathlib import Path
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger("Agent1")
+
+# --- Constants & Configuration ---
+
+DEFAULT_CONFIG = {
+  "internal_sources_dir": r"C:\Projects Python\Normalisation\Normalised Data\Internal Source files",
+  "questions_dir": r"C:\Projects Python\Normalisation\Normalised Data\Questions",
+  "images_dir": r"C:\Projects Python\Normalisation\Normalised Data\images",
+  "output_dir": r"C:\Projects Python\Normalisation\Output\Agent 1",
+  "openai_model": "gpt-5.2",
+  "max_chars_per_chunk": 120000,
+  "external_research_mandatory": True,
+  "max_web_sources_per_question": 6,
+  "download_pdfs": True,
+  "max_pdf_pages": 500,
+  "max_html_chars": 250000,
+  "request_timeout_sec": 120,
+  "overwrite": True,
+  "auto_install_dependencies": True
+}
+
+# --- Dependency Management ---
+
+def ensure_dependencies(config_path="config.json", self_test=False):
+    """Checks for dependencies and installs them if configured."""
+    if self_test:
+        logger.info("Self-test mode: Skipping dependency installation.")
+        return
+
+    # Load config to check auto_install policy
+    auto_install = True
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r') as f:
+                c = json.load(f)
+                auto_install = c.get("auto_install_dependencies", True)
+        except: pass
+
+    missing = False
+    try:
+        import openai
+        import requests
+        import bs4
+        import fitz
+        import googlesearch
+        import tenacity
+    except ImportError:
+        missing = True
+
+    if missing:
+        if auto_install:
+            logger.info("Installing dependencies from requirements.txt...")
+            req_path = "requirements.txt"
+            if not os.path.exists(req_path):
+                logger.error("requirements.txt not found. Cannot auto-install.")
+                sys.exit(1)
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_path])
+                logger.info("Dependencies installed successfully. Restarting script...")
+                os.execv(sys.executable, ['python'] + sys.argv)
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Failed to install dependencies: {e}")
+                sys.exit(1)
+        else:
+            logger.error("Missing dependencies. Set 'auto_install_dependencies': true or install manually.")
+            sys.exit(1)
+
+# Perform check BEFORE importing external modules
+if __name__ == "__main__":
+    is_self_test = "--self-test" in sys.argv
+    ensure_dependencies(self_test=is_self_test)
+
+# --- Imports (Safe now) ---
+try:
+    from openai import OpenAI
+    from tenacity import retry, stop_after_attempt, wait_exponential
+    import requests
+    from bs4 import BeautifulSoup, Comment
+    import fitz  # PyMuPDF
+    from googlesearch import search as google_search
+except ImportError:
+    if "--self-test" in sys.argv:
+        def retry(*args, **kwargs):
+            return lambda f: f
+        def stop_after_attempt(*args): return None
+        def wait_exponential(*args, **kwargs): return None
+    else:
+        logger.error("Dependencies missing and not in self-test mode.")
+        sys.exit(1)
+
+# --- Helper Classes ---
+
+class ConfigManager:
+    def __init__(self, config_path="config.json"):
+        self.config_path = config_path
+        self.config = self.load_config()
+
+    def load_config(self):
+        if not os.path.exists(self.config_path):
+            logger.error(f"Config file not found: {self.config_path}")
+            sys.exit(1)
+        with open(self.config_path, 'r') as f:
+            return json.load(f)
+
+    def get(self, key, default=None):
+        return self.config.get(key, default)
+
+    @property
+    def internal_sources_dir(self): return Path(self.config['internal_sources_dir'])
+    @property
+    def questions_dir(self): return Path(self.config['questions_dir'])
+    @property
+    def images_dir(self): return Path(self.config['images_dir'])
+    @property
+    def output_dir(self): return Path(self.config['output_dir'])
+
+class LLMClient:
+    def __init__(self, config):
+        self.api_key = os.environ.get("OPENAI_API_KEY")
+        if not self.api_key and "--self-test" not in sys.argv:
+            logger.error("OPENAI_API_KEY environment variable is missing.")
+            print("\nPlease set OPENAI_API_KEY environment variable.\n")
+            sys.exit(1)
+
+        if self.api_key:
+            self.client = OpenAI(api_key=self.api_key)
+        else:
+            self.client = None
+
+        self.model = config.get("openai_model", "gpt-5.2")
+        self.timeout = config.get("request_timeout_sec", 120)
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+    def call_llm(self, system_prompt: str, user_content: str, json_mode=False) -> str:
+        if not self.client:
+             raise RuntimeError("OpenAI Client not initialized (missing API key?)")
+
+        try:
+            kwargs = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content}
+                ],
+                "temperature": 0.2,
+                "timeout": self.timeout
+            }
+            if json_mode:
+                kwargs["response_format"] = {"type": "json_object"}
+
+            response = self.client.chat.completions.create(**kwargs)
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"LLM Call failed: {e}")
+            raise
+
+class FileManager:
+    def __init__(self, config: ConfigManager):
+        self.config = config
+        self.artifacts_dir = self.config.output_dir / "artifacts"
+        self.external_dir = self.config.output_dir / "external_sources"
+        self.run_log_path = self.config.output_dir / "run_log.jsonl"
+
+        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+        self.external_dir.mkdir(parents=True, exist_ok=True)
+
+    def read_internal_files(self) -> Dict[str, str]:
+        files = {}
+        path = self.config.internal_sources_dir
+        if not path.exists():
+            return {}
+        for p in path.rglob("*.txt"):
+            try:
+                rel_path = p.relative_to(path).as_posix()
+                files[rel_path] = p.read_text(encoding='utf-8', errors='replace')
+            except Exception as e:
+                logger.warning(f"Could not read {p}: {e}")
+        return files
+
+    def read_question_files(self) -> Dict[str, str]:
+        files = {}
+        path = self.config.questions_dir
+        if not path.exists():
+            return {}
+        for p in path.rglob("*.txt"):
+             try:
+                rel_path = p.relative_to(path).as_posix()
+                files[rel_path] = p.read_text(encoding='utf-8', errors='replace')
+             except Exception as e:
+                logger.warning(f"Could not read {p}: {e}")
+        return files
+
+    def save_artifact(self, filename: str, data: Any):
+        path = self.artifacts_dir / filename
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+        logger.info(f"Saved artifact: {filename}")
+
+    def save_artifact_text(self, filename: str, content: str):
+        path = self.artifacts_dir / filename
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        logger.info(f"Saved text artifact: {filename}")
+
+    def log_run(self, step: str, details: Dict):
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "step": step,
+            "details": details
+        }
+        with open(self.run_log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(entry) + "\n")
+
+    def save_text(self, filename: str, content: str):
+        path = self.config.output_dir / filename
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    def extract_images(self, text: str) -> List[str]:
+        # Fix 3: Enhanced Image Capture with block-scan (DOTALL) and anchored regex for markdown
+        images = []
+
+        # A) Bracket format: [[IMAGE: ...]] - extract blocks first, then ID
+        # Matches content between [[IMAGE: and ]] non-greedily, allowing newlines
+        bracket_blocks = re.findall(r'(?s)\[\[IMAGE:.*?\]\]', text)
+        for block in bracket_blocks:
+            # Capture IMG_... anywhere in the block
+            ids = re.findall(r'(IMG_[a-zA-Z0-9_]+)', block)
+            images.extend(ids)
+
+        # B) Markdown format: ![...](path/to/IMG_<id>.ext)
+        md_matches = re.findall(r'!\[.*?\]\((?:.*?[/\\\\])?(IMG_[a-zA-Z0-9_]+)\.(?:png|jpg|jpeg|webp|PNG|JPG|JPEG|WEBP)(?:\?.*?)?\)', text)
+        images.extend(md_matches)
+
+        return sorted(list(set(images)))
+
+    def parse_with_page_markers(self, filename: str, content: str) -> List[Dict]:
+        """
+        Splits content by '--- BEGIN PAGE n ---' markers (and PAGE-n variants).
+        Returns list of dicts: {'text': ..., 'page': n, 'file': filename, 'images': [...]}
+        """
+        chunks = []
+
+        split_pattern = r'(---\s*BEGIN\s*PAGE[-\s](\d+)\s*---)'
+        parts = re.split(split_pattern, content)
+
+        current_page = "1"
+        current_text = ""
+
+        # Handle preamble: Only if content exists (strip empty starts)
+        if parts and not parts[0].startswith('--- BEGIN PAGE'):
+             if parts[0].strip():
+                current_text = parts[0]
+                images = self.extract_images(current_text)
+                chunks.append({
+                    "file": filename,
+                    "page": current_page,
+                    "text": current_text.strip(),
+                    "images": images
+                })
+             parts = parts[1:]
+
+        # Iterate parts (marker, full_marker_text, page_num, content, ...)
+        for i in range(0, len(parts), 3):
+            if i+2 < len(parts):
+                page_num = parts[i+1]
+                text = parts[i+2]
+
+                # Fix 1: Prevent empty marker chunks
+                if not text.strip():
+                    continue
+
+                current_page = page_num
+                images = self.extract_images(text)
+                chunks.append({
+                    "file": filename,
+                    "page": current_page,
+                    "text": text.strip(),
+                    "images": images
+                })
+
+        # Fallback for no markers but content exists
+        if not chunks and content.strip():
+             images = self.extract_images(content)
+             chunks.append({"file": filename, "page": "1", "text": content, "images": images})
+
+        return chunks
+
+class WebResearcher:
+    def __init__(self, config: ConfigManager):
+        self.config = config
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        self.max_html_chars = self.config.get("max_html_chars", 250000)
+        self.max_pdf_pages = self.config.get("max_pdf_pages", 500)
+
+    def search(self, query: str, num_results: int = 5) -> List[str]:
+        try:
+            results = list(google_search(query, num_results=num_results, lang="en"))
+            return results
+        except Exception as e:
+            logger.error(f"Search failed for '{query}': {e}")
+            return []
+
+    def download_and_extract(self, url: str, output_dir: Path) -> Dict[str, Any]:
+        result = {
+            "url": url,
+            "access_date": datetime.now(timezone.utc).isoformat(),
+            "title": "",
+            "local_path": "",
+            "success": False,
+            "error": None,
+            "truncated": False
+        }
+
+        try:
+            response = requests.get(url, headers=self.headers, timeout=30)
+            response.raise_for_status()
+
+            content_type = response.headers.get('Content-Type', '').lower()
+            filename_base = re.sub(r'[^a-zA-Z0-9]', '_', url)[-50:]
+            if not filename_base: filename_base = "source"
+
+            if 'application/pdf' in content_type or url.lower().endswith('.pdf'):
+                filename = f"{filename_base}.pdf"
+                local_path = output_dir / filename
+                with open(local_path, 'wb') as f:
+                    f.write(response.content)
+
+                text = self._extract_pdf_text(local_path)
+                result["local_path"] = str(local_path)
+                result["success"] = True
+                result["extracted_text_path"] = str(output_dir / f"{filename_base}.txt")
+                with open(result["extracted_text_path"], 'w', encoding='utf-8') as f:
+                    f.write(text)
+
+            else:
+                filename = f"{filename_base}.html"
+                local_path = output_dir / filename
+                with open(local_path, 'w', encoding='utf-8', errors='replace') as f:
+                    f.write(response.text)
+
+                soup = BeautifulSoup(response.text, 'html.parser')
+                result["title"] = soup.title.string if soup.title else "No Title"
+
+                for element in soup(["script", "style", "nav", "footer", "header"]):
+                    element.decompose()
+
+                for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+                    comment.extract()
+
+                text = soup.get_text(separator='\n')
+                text = re.sub(r'\n\s*\n', '\n\n', text).strip()
+
+                if len(text) > self.max_html_chars:
+                    text = text[:self.max_html_chars] + "\n\n[TRUNCATED]"
+                    result["truncated"] = True
+
+                result["local_path"] = str(local_path)
+                result["success"] = True
+                result["extracted_text_path"] = str(output_dir / f"{filename_base}.txt")
+                with open(result["extracted_text_path"], 'w', encoding='utf-8') as f:
+                    f.write(text)
+
+        except Exception as e:
+            result["error"] = str(e)
+            logger.warning(f"Download failed for {url}: {e}")
+
+        return result
+
+    def _extract_pdf_text(self, pdf_path: Path) -> str:
+        text = ""
+        try:
+            doc = fitz.open(pdf_path)
+            for i, page in enumerate(doc):
+                if i >= self.max_pdf_pages:
+                    text += "\n[PDF TRUNCATED: Max pages reached]"
+                    break
+                text += f"\n--- PDF PAGE {i+1} ---\n"
+                text += page.get_text()
+            doc.close()
+        except Exception as e:
+            text += f"\n[PDF READ ERROR: {e}]"
+        return text
+
+# --- Prompts ---
+
+PROMPT_PERSONA = """You are Deep Research Agent 1, an expert academic researcher and MBA examiner.
+Your domain covers management, business, economics, finance, and accounting.
+You are methodical, comprehensive, and defensible.
+You prioritise correctness, evidence, and rigorous reasoning over style.
+"""
+
+# --- Orchestrator ---
+
+class Orchestrator:
+    def __init__(self):
+        self.config_manager = ConfigManager()
+        self.file_manager = FileManager(self.config_manager)
+        if "--self-test" not in sys.argv:
+             self.llm = LLMClient(self.config_manager.config)
+             self.web = WebResearcher(self.config_manager)
+
+    def run(self):
+        logger.info("Starting Agent 1 Pipeline...")
+        start_time = time.time()
+
+        # STEP 1
+        logger.info("STEP 1: Internal Ingestion & Memory Creation")
+        internal_files = self.file_manager.read_internal_files()
+        all_chunks = []
+        max_chars = self.config_manager.get("max_chars_per_chunk", 120000)
+
+        for fname, content in internal_files.items():
+            chunks = self.file_manager.parse_with_page_markers(fname, content)
+
+            # Fix 2: Refined Marker Presence Guardrail (count based)
+            marker_pattern = r'---\s*BEGIN\s*PAGE[-\s]\d+\s*---'
+            marker_count = len(re.findall(marker_pattern, content, flags=re.IGNORECASE))
+            has_markers = marker_count > 0
+
+            # Only hard fail if significant markers exist but only 1 chunk produced (parse failure)
+            if marker_count > 1 and len(chunks) == 1:
+                logger.error(f"Internal Marker Parse Failed: {fname} has {marker_count} markers but yielded only 1 chunk.")
+                self.file_manager.log_run("internal_marker_parse_failed_despite_markers", {
+                    "file": fname, "content_len": len(content), "marker_count": marker_count
+                })
+                sys.exit(1)
+
+            # Fallback trigger: No markers AND single chunk AND large content
+            if not has_markers and len(chunks) == 1 and len(content) > max_chars:
+                logger.warning(f"Triggering fallback chunking for {fname} (length {len(content)})")
+                self.file_manager.log_run("internal_marker_parse_fallback", {"file": fname, "original_len": len(content), "original_chunks": 1})
+
+                fallback_size = 50000
+                raw_text_chunks = [content[i:i+fallback_size] for i in range(0, len(content), fallback_size)]
+
+                chunks = []
+                for i, rc in enumerate(raw_text_chunks):
+                    images = self.file_manager.extract_images(rc)
+                    chunks.append({
+                        "file": fname,
+                        "page": "1",
+                        "chunk_id": f"fallback_{i+1}",
+                        "text": rc,
+                        "images": images
+                    })
+                self.file_manager.log_run("internal_marker_parse_fallback_complete", {"file": fname, "new_chunk_count": len(chunks)})
+
+            all_chunks.extend(chunks)
+
+        internal_index = self.step_1_ingest(all_chunks)
+        self.file_manager.log_run("step_1", {"files": len(internal_files), "chunks": len(all_chunks)})
+
+        # STEP 2
+        logger.info("STEP 2: Synopsis Generation")
+        synopsis = self.step_2_synopsis(internal_index)
+        self.file_manager.log_run("step_2", {"synopsis_len": len(synopsis)})
+
+        # STEP 3
+        logger.info("STEP 3: Question Extraction")
+        raw_questions = self.file_manager.read_question_files()
+        if not raw_questions:
+            logger.error("No question files found.")
+            sys.exit(1)
+        questions_struct = self.step_3_questions(raw_questions)
+        self.file_manager.log_run("step_3", {"questions_count": len(questions_struct)})
+
+        # STEP 4
+        logger.info("STEP 4: Internal Evidence Mapping")
+        evidence_map = self.step_4_internal_mapping(all_chunks, questions_struct, internal_index)
+        self.file_manager.log_run("step_4", {"mapped_questions": len(evidence_map)})
+
+        # STEP 5
+        logger.info("STEP 5: External Research Planning")
+        search_plan = self.step_5_plan_search(questions_struct, evidence_map)
+        self.file_manager.log_run("step_5", {"plan_items": len(search_plan)})
+
+        # STEP 6
+        logger.info("STEP 6: External Research Execution")
+        external_sources_index = self.step_6_execute_search(search_plan)
+        self.file_manager.log_run("step_6", {"sources_downloaded": len(external_sources_index)})
+
+        # STEP 7
+        logger.info("STEP 7: External Evidence Mapping")
+        evidence_map = self.step_7_external_mapping(external_sources_index, questions_struct, evidence_map)
+        self.file_manager.log_run("step_7", {"updated_map": True})
+
+        # STEP 8
+        logger.info("STEP 8: Final Answer Synthesis")
+        final_answers = self.step_8_answers(questions_struct, evidence_map, synopsis)
+        self.file_manager.log_run("step_8", {"answers_generated": len(final_answers)})
+
+        # STEP 9
+        logger.info("STEP 9: Adequacy Check")
+        final_answers = self.step_9_check(final_answers, questions_struct)
+        self.file_manager.log_run("step_9", {"checked": True})
+
+        # STEP 10
+        logger.info("STEP 10: Output Generation")
+        self.step_10_output(synopsis, final_answers, evidence_map, questions_struct)
+        self.file_manager.log_run("step_10", {"duration": time.time() - start_time})
+
+        logger.info("Agent 1 Pipeline Complete.")
+
+    def step_1_ingest(self, chunks: List[Dict]) -> Dict:
+        combined_index = {
+            "definitions": [], "theories": [], "formulas": [],
+            "examples": [], "image_markers": [], "provenance": []
+        }
+        files_seen = set()
+
+        prompt_tmpl = PROMPT_PERSONA + """
+        Analyze the text from file '{filename}' (Page {page}).
+        Extract: Definitions, Theories/Frameworks, Formulas, Examples.
+        Also note the pre-extracted image markers: {images}.
+        Return JSON keys: definitions, theories, formulas, examples.
+        For images, return a list 'images_context' describing what the image likely depicts based on surrounding text.
+        """
+
+        for c in chunks:
+            fname = c['file']
+            page = c['page']
+            text = c['text']
+            imgs = c['images']
+            files_seen.add(fname)
+
+            response_str = self.llm.call_llm(
+                system_prompt="Indexing engine. JSON only.",
+                user_content=prompt_tmpl.format(filename=fname, page=page, images=imgs) + f"\n\nTEXT:\n{text}",
+                json_mode=True
+            )
+            try:
+                data = json.loads(response_str)
+                for key in ["definitions", "theories", "formulas", "examples"]:
+                    if key in data and isinstance(data[key], list):
+                        for item in data[key]:
+                            if isinstance(item, str): item = {'text': item}
+                            item['source'] = fname
+                            item['page'] = page
+                            combined_index[key].append(item)
+                if imgs:
+                    img_contexts = data.get("images_context", [])
+                    for i, img_id in enumerate(imgs):
+                        ctx = img_contexts[i] if i < len(img_contexts) else "No context extracted"
+                        combined_index["image_markers"].append({
+                            "image_id": img_id,
+                            "source": fname,
+                            "page": page,
+                            "context": ctx
+                        })
+            except Exception as e:
+                logger.warning(f"Index error {fname} p{page}: {e}")
+
+        combined_index["provenance"] = list(files_seen)
+        self.file_manager.save_artifact("internal_index.json", combined_index)
+        return combined_index
+
+    def step_2_synopsis(self, index: Dict) -> str:
+        full_index_str = json.dumps(index)
+        chunk_size = 50000
+        chunks = [full_index_str[i:i+chunk_size] for i in range(0, len(full_index_str), chunk_size)]
+
+        synopsis_notes = []
+        for i, chunk in enumerate(chunks):
+            resp = self.llm.call_llm(
+                system_prompt=PROMPT_PERSONA,
+                user_content=f"PARTIAL INDEX ({i+1}/{len(chunks)}):\n{chunk}\n\nDraft detailed synopsis notes for this part. Focus on themes, theories, and scope."
+            )
+            synopsis_notes.append(resp)
+
+        combined_notes = "\n---\n".join(synopsis_notes)
+        self.file_manager.save_artifact_text("synopsis_notes.txt", combined_notes)
+
+        final_synopsis = self.llm.call_llm(
+            system_prompt=PROMPT_PERSONA,
+            user_content=f"ALL SYNOPSIS NOTES:\n{combined_notes}\n\nWrite a single, comprehensive, cohesive Synopsis of the material."
+        )
+        return final_synopsis
+
+    def step_3_questions(self, raw_files: Dict[str, str]) -> List[Dict]:
+        questions_text = "\n".join([f"--- FILE: {k} ---\n{v}" for k, v in raw_files.items()])
+        prompt = """Extract questions. Return JSON: {"questions": [{"id": "1", "text": "...", "subparts": [...]}]}."""
+        response = self.llm.call_llm(
+            system_prompt="Question extractor. JSON only.",
+            user_content=f"{questions_text}\n\n{prompt}",
+            json_mode=True
+        )
+        try:
+            data = json.loads(response)
+            qs = data.get("questions", [])
+            self.file_manager.save_artifact("questions.json", qs)
+            return qs
+        except: return []
+
+    def step_4_internal_mapping(self, all_chunks: List[Dict], questions: List[Dict], index: Dict) -> Dict:
+        evidence_map = {q['id']: {"internal_evidence": [], "external_evidence": [], "image_evidence": [], "analysis": ""} for q in questions}
+
+        for q in questions:
+            q_text = (q['text'] + " " + " ".join(q.get('subparts', []))).lower()
+            q_tokens = set(q_text.split())
+
+            scored = []
+            for c in all_chunks:
+                score = sum(1 for t in q_tokens if t in c['text'].lower())
+                scored.append((score, c))
+
+            # High recall: top 100
+            scored.sort(key=lambda x: x[0], reverse=True)
+            top_chunks = [x[1] for x in scored[:100]]
+
+            snippets = ""
+            for c in top_chunks:
+                snippets += f"\n--- Source: {c['file']} (Page {c['page']}) ---\n"
+                snippets += f"Image Markers: {c['images']}\n"
+                snippets += f"{c['text']}\n"
+
+            prompt = PROMPT_PERSONA + """
+            Analyze the provided snippets against the Question.
+            Identify relevant text evidence AND image evidence.
+
+            Return JSON:
+            {
+              "relevant_text": [{"source": "filename", "page": "n", "text_excerpt": "...", "what_it_supports": "..."}],
+              "relevant_images": [{"image_id": "IMG_...", "source": "filename", "page": "n", "reason": "..."}]
+            }
+            """
+
+            response = self.llm.call_llm(
+                system_prompt="Evidence Mapper. JSON only.",
+                user_content=f"Q: {q['text']}\nSNIPPETS:\n{snippets}\n\n{prompt}",
+                json_mode=True
+            )
+            try:
+                data = json.loads(response)
+                evidence_map[q['id']]['internal_evidence'] = data.get('relevant_text', [])
+                evidence_map[q['id']]['image_evidence'] = data.get('relevant_images', [])
+            except: pass
+
+        self.file_manager.save_artifact("evidence_map.json", evidence_map)
+        return evidence_map
+
+    def step_5_plan_search(self, questions: List[Dict], evidence_map: Dict) -> List[Dict]:
+        ctx = [{"id": q['id'], "text": q['text'], "has_internal": len(evidence_map[q['id']]['internal_evidence'])>0} for q in questions]
+        response = self.llm.call_llm(
+            system_prompt="Research Planner. JSON only.",
+            user_content=f"STATUS:\n{json.dumps(ctx)}\n\nGenerate search queries. JSON: {{'search_plan': [{{'question_id': '...', 'queries': [...]}}]}}",
+            json_mode=True
+        )
+        try:
+            plan = json.loads(response).get("search_plan", [])
+            self.file_manager.save_artifact("search_plan.json", plan)
+            return plan
+        except: return []
+
+    def step_6_execute_search(self, plan: List[Dict]) -> List[Dict]:
+        ext_index = []
+        for item in plan:
+            seen = set()
+            for q in item['queries']:
+                for url in self.web.search(q, 3):
+                    if url in seen: continue
+                    seen.add(url)
+                    logger.info(f"Downloading {url}")
+                    res = self.web.download_and_extract(url, self.file_manager.external_dir)
+                    res['question_id_target'] = item['question_id']
+                    if res.get('truncated'):
+                        self.file_manager.log_run("step_6_truncation", {"url": url})
+                    ext_index.append(res)
+        self.file_manager.save_artifact("external_sources_index.json", ext_index)
+        return ext_index
+
+    def step_7_external_mapping(self, external_index: List[Dict], questions: List[Dict], evidence_map: Dict) -> Dict:
+        grouped = {}
+        for d in external_index:
+            if d['success']: grouped.setdefault(d.get('question_id_target'), []).append(d)
+
+        for q in questions:
+            qid = q['id']
+            if qid not in grouped: continue
+
+            all_evidence = []
+
+            for d in grouped[qid]:
+                try:
+                    with open(d['extracted_text_path'], encoding='utf-8') as f:
+                        full_text = f.read()
+
+                    chunk_size = 15000
+                    text_chunks = [full_text[i:i+chunk_size] for i in range(0, len(full_text), chunk_size)]
+
+                    for i, chunk in enumerate(text_chunks):
+                        prompt = PROMPT_PERSONA + """
+                        Analyze EXTERNAL text chunk. Extract evidence.
+                        Return JSON: {"external_evidence": [{"url": "...", "access_date": "...", "text_excerpt": "...", "what_it_supports": "..."}]}
+                        """
+                        context = f"Source: {d['url']}\nAccess Date: {d['access_date']}\nChunk {i+1}/{len(text_chunks)}\n{chunk}"
+
+                        response = self.llm.call_llm(
+                            system_prompt="Evidence Mapper. JSON only.",
+                            user_content=f"Q: {q['text']}\nTEXT:\n{context}\n\n{prompt}",
+                            json_mode=True
+                        )
+                        try:
+                            items = json.loads(response).get('external_evidence', [])
+                            for it in items:
+                                if 'url' not in it: it['url'] = d['url']
+                                if 'access_date' not in it: it['access_date'] = d['access_date']
+                            all_evidence.extend(items)
+                        except: pass
+                except: pass
+
+            before_count = len(all_evidence)
+            deduped = []
+            seen_keys = set()
+            for ev in all_evidence:
+                support_key = str(ev.get('what_it_supports', '')).strip().lower()
+                excerpt_key = str(ev.get('text_excerpt', ''))[:200].strip().lower()
+                unique_key = (ev.get('url'), support_key, excerpt_key)
+
+                if unique_key not in seen_keys:
+                    seen_keys.add(unique_key)
+                    deduped.append(ev)
+
+            after_count = len(deduped)
+            if before_count != after_count:
+                self.file_manager.log_run("external_evidence_dedup", {
+                    "qid": qid, "before": before_count, "after": after_count
+                })
+
+            if qid in evidence_map:
+                evidence_map[qid]['external_evidence'] = deduped
+
+        self.file_manager.save_artifact("evidence_map.json", evidence_map)
+        return evidence_map
+
+    def step_8_answers(self, questions: List[Dict], evidence_map: Dict, synopsis: str) -> Dict:
+        answers = {}
+        # Deterministic Budget Loop
+        MAX_PROMPT_CHARS = 25000
+        STATIC_OVERHEAD = 2000
+
+        for q in questions:
+            ev = evidence_map.get(q['id'], {})
+
+            internal_str = json.dumps(ev.get('internal_evidence', []))
+            external_str = json.dumps(ev.get('external_evidence', []))
+            image_str = json.dumps(ev.get('image_evidence', []))
+
+            combined_evidence = f"INTERNAL: {internal_str}\nIMAGES: {image_str}\nEXTERNAL: {external_str}"
+
+            # 1. Initial Packing
+            evidence_pack = combined_evidence
+            if len(combined_evidence) > 30000:
+                self.file_manager.log_run("step_8a_packing", {"qid": q['id'], "len": len(combined_evidence)})
+                chunks = [combined_evidence[i:i+20000] for i in range(0, len(combined_evidence), 20000)]
+                packed_chunks = []
+                for i, c in enumerate(chunks):
+                    resp = self.llm.call_llm(
+                        system_prompt=PROMPT_PERSONA,
+                        user_content=f"EVIDENCE CHUNK ({i+1}/{len(chunks)}):\n{c}\n\nConsolidate this evidence into an answer-ready format. Preserve all citations, URLs, and specific details. Remove redundancy."
+                    )
+                    packed_chunks.append(resp)
+                evidence_pack = "\n".join(packed_chunks)
+
+            # 2. Deterministic Budget Enforcement
+            evidence_budget = MAX_PROMPT_CHARS - len(synopsis) - len(q['text']) - STATIC_OVERHEAD
+            # Ensure a minimal budget exists even if synopsis is huge
+            if evidence_budget < 5000: evidence_budget = 5000
+
+            if len(evidence_pack) > evidence_budget:
+                self.file_manager.log_run("step_8_budget_enforcement_start", {"qid": q['id'], "len": len(evidence_pack), "budget": evidence_budget})
+
+                for attempt in range(3):
+                    if len(evidence_pack) <= evidence_budget:
+                        break
+
+                    evidence_pack = self.llm.call_llm(
+                        system_prompt=PROMPT_PERSONA,
+                        user_content=f"EVIDENCE PACK (Too Large):\n{evidence_pack}\n\nCompress this evidence to under {evidence_budget} characters. Preserve ALL citations, URLs, and image IDs. Remove only redundancy."
+                    )
+                    self.file_manager.log_run("step_8_budget_compression_pass", {"qid": q['id'], "pass": attempt+1, "len": len(evidence_pack)})
+
+                # Fix 4: Final hard clamp if still over budget
+                if len(evidence_pack) > evidence_budget:
+                    self.file_manager.log_run("step_8_budget_hard_clamp", {
+                        "qid": q['id'], "len": len(evidence_pack), "budget": evidence_budget
+                    })
+                    evidence_pack = evidence_pack[:evidence_budget]
+
+            response = self.llm.call_llm(
+                system_prompt=PROMPT_PERSONA,
+                user_content=f"""SYNOPSIS: {synopsis}
+                Q: {q['text']}
+                EVIDENCE PACK: {evidence_pack}
+
+                Write academic answer. Cite images as [IMAGE: IMG_xxx]. Cite text as [internal: file p.x] or [external: url].
+                """
+            )
+            answers[q['id']] = response
+        return answers
+
+    def step_9_check(self, answers: Dict, questions: List[Dict]) -> Dict:
+        for q in questions:
+            qid = q['id']
+            resp = self.llm.call_llm(
+                system_prompt="Examiner.",
+                user_content=f"Q: {q['text']}\nANS: {answers.get(qid)}\n\nCritique. If ok, return PASS. Else return improved answer."
+            )
+            if "PASS" not in resp[:10]: answers[qid] = resp
+        return answers
+
+    def step_10_output(self, synopsis: str, answers: Dict, evidence_map: Dict, questions: List[Dict]):
+        lines = ["=== SYNOPSIS ===", synopsis, "\n=== QUESTIONS & ANSWERS ==="]
+        trace_lines = ["question_id | source_type | source | location | what_it_supports"]
+
+        q_map = {q['id']: q['text'] for q in questions}
+
+        for qid in sorted(answers.keys()):
+            lines.extend([f"\n--- QUESTION {qid} ---"])
+            lines.append(q_map.get(qid, "Unknown Question"))
+            lines.extend([f"--- ANSWER {qid} ---", answers[qid]])
+
+            ev = evidence_map.get(qid, {})
+
+            for i in ev.get('internal_evidence', []):
+                loc = f"Page {i.get('page', '?')}"
+                supp = i.get('what_it_supports', 'Evidence')
+                trace_lines.append(f"{qid} | internal | {i.get('source')} | {loc} | {supp}")
+
+            for i in ev.get('image_evidence', []):
+                loc = f"Page {i.get('page', '?')}"
+                supp = i.get('reason', 'Image Evidence')
+                trace_lines.append(f"{qid} | image | {i.get('image_id')} | {loc} | {supp}")
+
+            for i in ev.get('external_evidence', []):
+                loc = i.get('access_date', 'Unknown Date')
+                supp = i.get('what_it_supports', 'Evidence')
+                trace_lines.append(f"{qid} | external | {i.get('url')} | {loc} | {supp}")
+
+        self.file_manager.save_text("report.txt", "\n".join(lines))
+        self.file_manager.save_text("citations_trace.txt", "\n".join(trace_lines))
+
+# --- Self Test ---
+
+def run_self_test():
+    logger.info("Running self-test...")
+    if not os.path.exists("config.json"):
+        logger.error("FAIL: config.json missing")
+        sys.exit(1)
+    with open("config.json") as f: conf = json.load(f)
+
+    # Check paths
+    for p in [conf['internal_sources_dir'], conf['questions_dir'], conf['images_dir']]:
+        if not os.path.exists(p): logger.warning(f"WARNING: Path missing: {p}")
+        else: logger.info(f"OK: Path exists: {p}")
+
+    # Check output
+    try:
+        os.makedirs(conf['output_dir'], exist_ok=True)
+        t = os.path.join(conf['output_dir'], "test.tmp")
+        with open(t, 'w') as f: f.write("x")
+        os.remove(t)
+        logger.info("OK: Output writable")
+    except: logger.error("FAIL: Output not writable")
+
+    # Check API Key
+    if os.environ.get("OPENAI_API_KEY"): logger.info("OK: API Key present")
+    else: logger.error("FAIL: API Key missing")
+
+    # Check dependencies (should be present if ensure_dependencies ran or env is good)
+    try:
+        import openai
+        import requests
+        import bs4
+        import fitz
+        import googlesearch
+        import tenacity
+        logger.info("OK: Dependencies importable")
+    except ImportError as e:
+        logger.error(f"FAIL: Missing dependencies: {e}")
+
+    logger.info("Self-test complete.")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args()
+
+    if args.self_test:
+        run_self_test()
+    else:
+        Orchestrator().run()
