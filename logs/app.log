@@ -79,3 +79,51 @@ FileNotFoundError: Question bank root does not exist: C:\Projects Python\11+ que
 2026-01-19 23:58:18 [INFO] Started set 143522165554448ebd9b4678f2b357d2 mode=mixed topic=— timer=True difficulty=
 2026-01-19 23:58:18 [INFO] Serving question uid=temp_qb/maths/test.json::Q1 file=temp_qb/maths/test.json qid=1
 2026-01-19 23:58:19 [INFO] Stored 1 attempts for set 143522165554448ebd9b4678f2b357d2.
+2026-01-20 16:21:36 [INFO] Created/Updated file: /app/templates/index.html
+2026-01-20 16:21:36 [INFO] Created/Updated file: /app/templates/practice.html
+2026-01-20 16:21:36 [INFO] Created/Updated file: /app/templates/results.html
+2026-01-20 16:21:36 [INFO] Created/Updated file: /app/static/app.css
+2026-01-20 16:21:36 [ERROR] Fatal error: Question bank root does not exist: C:\Projects Python\11+ question bank\Question bank
+2026-01-20 16:21:36 [ERROR] Traceback (most recent call last):
+  File "/app/app.py", line 1476, in <module>
+    main()
+  File "/app/app.py", line 1455, in main
+    QB = load_question_bank()
+        ^^^^^^^^^^^^^^^^^^^^
+  File "/app/app.py", line 195, in load_question_bank
+    raise FileNotFoundError(f"Question bank root does not exist: {QUESTION_BANK_ROOT}")
+FileNotFoundError: Question bank root does not exist: C:\Projects Python\11+ question bank\Question bank
+
+2026-01-20 16:22:07 [INFO] Created/Updated file: /app/templates/index.html
+2026-01-20 16:22:07 [INFO] Created/Updated file: /app/templates/practice.html
+2026-01-20 16:22:07 [INFO] Created/Updated file: /app/templates/results.html
+2026-01-20 16:22:07 [INFO] Created/Updated file: /app/static/app.css
+2026-01-20 16:22:07 [ERROR] Fatal error: Question bank root does not exist: C:\Projects Python\11+ question bank\Question bank
+2026-01-20 16:22:07 [ERROR] Traceback (most recent call last):
+  File "/app/app.py", line 1476, in <module>
+    main()
+  File "/app/app.py", line 1455, in main
+    QB = load_question_bank()
+        ^^^^^^^^^^^^^^^^^^^^
+  File "/app/app.py", line 195, in load_question_bank
+    raise FileNotFoundError(f"Question bank root does not exist: {QUESTION_BANK_ROOT}")
+FileNotFoundError: Question bank root does not exist: C:\Projects Python\11+ question bank\Question bank
+
+2026-01-20 16:23:31 [INFO] Created/Updated file: /app/templates/index.html
+2026-01-20 16:23:31 [INFO] Created/Updated file: /app/templates/practice.html
+2026-01-20 16:23:31 [INFO] Created/Updated file: /app/templates/results.html
+2026-01-20 16:23:31 [INFO] Created/Updated file: /app/static/app.css
+2026-01-20 16:23:31 [INFO] Found 1 JSON files under bank root.
+2026-01-20 16:23:31 [INFO] Loaded 1 questions across 1 topics and 1 levels.
+2026-01-20 16:23:31 [INFO] Opening browser at http://127.0.0.1:5000
+2026-01-20 16:23:31 [INFO] Starting server at http://127.0.0.1:5000
+2026-01-20 16:24:48 [INFO] Created/Updated file: /app/templates/index.html
+2026-01-20 16:24:48 [INFO] Created/Updated file: /app/templates/practice.html
+2026-01-20 16:24:48 [INFO] Created/Updated file: /app/templates/results.html
+2026-01-20 16:24:48 [INFO] Created/Updated file: /app/static/app.css
+2026-01-20 16:24:48 [INFO] Found 1 JSON files under bank root.
+2026-01-20 16:24:48 [INFO] Loaded 1 questions across 1 topics and 1 levels.
+2026-01-20 16:24:48 [INFO] Opening browser at http://127.0.0.1:5000
+2026-01-20 16:24:48 [INFO] Starting server at http://127.0.0.1:5000
+2026-01-20 16:25:02 [INFO] Started set 52e82924c5af461a8f68415f054e841b mode=mixed topic=— timer=True difficulty=
+2026-01-20 16:25:02 [INFO] Serving question uid=temp_qb/maths/test.json::Q1 file=temp_qb/maths/test.json qid=1

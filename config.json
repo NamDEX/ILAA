@@ -5,7 +5,7 @@
     "secret_key": "CHANGE_ME_TO_ANY_RANDOM_STRING"
   },
   "paths": {
-    "question_bank_root": "C:\\Projects Python\\11+ question bank\\Question bank",
+    "question_bank_root": "temp_qb",
     "never_write_to_source": true,
     "data_dir": "data",
     "logs_dir": "logs",
@@ -26,7 +26,7 @@
     "avoid_repeat_within_last_n_sets": 2
   },
   "timer": {
-    "enabled_by_default": false,
+    "enabled_by_default": true,
     "duration_seconds": 600,
     "ui_display": "subtle",
     "auto_submit_on_expiry": true

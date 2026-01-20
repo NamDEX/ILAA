@@ -10,8 +10,8 @@
   <div class="container">
     <header class="header">
       <div>
-        <h1>11+ Practice</h1>
-        <p class="subtitle">10-question sets. Calm timer. Clear review.</p>
+        <h1>OHANA 11+ Academy with Stitch</h1>
+        <p class="subtitle">Practice makes you PERFECT!</p>
       </div>
     </header>
 
@@ -78,6 +78,32 @@
       </ul>
     </div>
   </div>
+
+  <!-- Stitch Decorations -->
+  <img src="https://media.tenor.com/yheo1GGu3FwAAAAj/stitch.gif" class="stitch-decoration left" alt="Stitch">
+  <img src="https://media.tenor.com/yheo1GGu3FwAAAAj/stitch.gif" class="stitch-decoration right" alt="Stitch">
+
+<style>
+  .stitch-decoration {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 250px;
+    z-index: -1;
+    pointer-events: none; /* Let clicks pass through */
+  }
+  .stitch-decoration.left {
+    left: 20px;
+  }
+  .stitch-decoration.right {
+    right: 20px;
+  }
+  @media (max-width: 1400px) {
+    .stitch-decoration {
+      display: none;
+    }
+  }
+</style>
 
 <script>
   const modeSelect = document.getElementById('modeSelect');
