@@ -606,7 +606,7 @@ INDEX_HTML = r"""<!doctype html>
           <div class="hint">Timer is subtle on-screen. Set auto-submits when time ends.</div>
         </div>
 
-        <button class="btn" type="submit">Start</button>
+        <button class="btn primary" type="submit">Start</button>
       </form>
     </div>
 
@@ -726,12 +726,8 @@ PRACTISE_HTML = r"""<!doctype html>
     const pct = Math.min(100, Math.max(0, (elapsed / durationMs) * 100));
     fill.style.width = pct + "%";
 
-    // Feature 6: always show text or logic from config? keeping logic for now
-    if (remaining <= 120000) {
-      text.textContent = fmt(remaining);
-    } else {
-      text.textContent = "";
-    }
+    // Feature 6: always show text (user request)
+    text.textContent = fmt(remaining);
 
     if (remaining <= 0) {
       // Auto-submit when time expires
@@ -775,6 +771,7 @@ RESULTS_HTML = r"""<!doctype html>
       </div>
 
       <div class="actions">
+        <a class="btn primary" href="{{ url_for('index') }}">Home</a>
         <a class="btn secondary" href="{{ url_for('index') }}">New set</a>
       </div>
     </div>
@@ -929,6 +926,10 @@ h3 { margin: 0 0 8px 0; font-size: 16px; }
   font-weight: 700;
   cursor: pointer;
   text-decoration: none;
+}
+.btn.primary {
+  background: #2bd576; /* Sleek Green */
+  color: #06101f;
 }
 .btn.secondary {
   background: transparent;

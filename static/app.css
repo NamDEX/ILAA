@@ -80,6 +80,10 @@ h3 { margin: 0 0 8px 0; font-size: 16px; }
   cursor: pointer;
   text-decoration: none;
 }
+.btn.primary {
+  background: #2bd576; /* Sleek Green */
+  color: #06101f;
+}
 .btn.secondary {
   background: transparent;
   color: var(--text);

@@ -92,12 +92,8 @@
     const pct = Math.min(100, Math.max(0, (elapsed / durationMs) * 100));
     fill.style.width = pct + "%";
 
-    // Feature 6: always show text or logic from config? keeping logic for now
-    if (remaining <= 120000) {
-      text.textContent = fmt(remaining);
-    } else {
-      text.textContent = "";
-    }
+    // Feature 6: always show text (user request)
+    text.textContent = fmt(remaining);
 
     if (remaining <= 0) {
       // Auto-submit when time expires
