@@ -1,0 +1,129 @@
+2026-01-19 23:36:16 [INFO] Created/Updated file: /app/templates/index.html
+2026-01-19 23:36:16 [INFO] Created/Updated file: /app/templates/practice.html
+2026-01-19 23:36:16 [INFO] Created/Updated file: /app/templates/results.html
+2026-01-19 23:36:16 [INFO] Created/Updated file: /app/static/app.css
+2026-01-19 23:36:16 [INFO] Found 1 JSON files under bank root.
+2026-01-19 23:36:16 [ERROR] Error loading temp_qb/maths/test.json: 'str' object has no attribute 'get'
+2026-01-19 23:36:16 [ERROR] Traceback (most recent call last):
+  File "/app/app.py", line 269, in load_question_bank
+    diagnostics_map[l] = (opt.get("diagnostic") or "").strip()
+                         ^^^^^^^
+AttributeError: 'str' object has no attribute 'get'
+
+2026-01-19 23:36:16 [INFO] Loaded 0 questions across 1 topics and 1 levels.
+2026-01-19 23:36:16 [ERROR] No questions loaded. Check config.json question_bank_root and JSON formats.
+2026-01-19 23:36:16 [INFO] Opening browser at http://127.0.0.1:5000
+2026-01-19 23:36:16 [INFO] Starting server at http://127.0.0.1:5000
+2026-01-19 23:36:41 [INFO] Started set b31c7b8622f844d3b498ad3d88d9d28a mode=mixed topic=— timer=True difficulty=
+2026-01-19 23:36:41 [INFO] Stored 0 attempts for set b31c7b8622f844d3b498ad3d88d9d28a.
+2026-01-19 23:37:00 [INFO] Created/Updated file: /app/templates/index.html
+2026-01-19 23:37:00 [INFO] Created/Updated file: /app/templates/practice.html
+2026-01-19 23:37:00 [INFO] Created/Updated file: /app/templates/results.html
+2026-01-19 23:37:00 [INFO] Created/Updated file: /app/static/app.css
+2026-01-19 23:37:00 [INFO] Found 1 JSON files under bank root.
+2026-01-19 23:37:00 [ERROR] Error loading temp_qb/maths/test.json: 'str' object has no attribute 'get'
+2026-01-19 23:37:00 [ERROR] Traceback (most recent call last):
+  File "/app/app.py", line 269, in load_question_bank
+    diagnostics_map[l] = (opt.get("diagnostic") or "").strip()
+                         ^^^^^^^
+AttributeError: 'str' object has no attribute 'get'
+
+2026-01-19 23:37:00 [INFO] Loaded 0 questions across 1 topics and 1 levels.
+2026-01-19 23:37:00 [ERROR] No questions loaded. Check config.json question_bank_root and JSON formats.
+2026-01-19 23:37:00 [INFO] Opening browser at http://127.0.0.1:5000
+2026-01-19 23:37:00 [INFO] Starting server at http://127.0.0.1:5000
+2026-01-19 23:37:06 [INFO] Started set c110506b896c4374ae9106a8c5490da1 mode=mixed topic=— timer=True difficulty=
+2026-01-19 23:37:06 [INFO] Stored 0 attempts for set c110506b896c4374ae9106a8c5490da1.
+2026-01-19 23:37:49 [INFO] Created/Updated file: /app/templates/index.html
+2026-01-19 23:37:49 [INFO] Created/Updated file: /app/templates/practice.html
+2026-01-19 23:37:49 [INFO] Created/Updated file: /app/templates/results.html
+2026-01-19 23:37:49 [INFO] Created/Updated file: /app/static/app.css
+2026-01-19 23:37:49 [ERROR] Fatal error: Question bank root does not exist: C:\Projects Python\11+ question bank\Question bank
+2026-01-19 23:37:49 [ERROR] Traceback (most recent call last):
+  File "/app/app.py", line 1475, in <module>
+    main()
+  File "/app/app.py", line 1454, in main
+    QB = load_question_bank()
+        ^^^^^^^^^^^^^^^^^^^^
+  File "/app/app.py", line 195, in load_question_bank
+    raise FileNotFoundError(f"Question bank root does not exist: {QUESTION_BANK_ROOT}")
+FileNotFoundError: Question bank root does not exist: C:\Projects Python\11+ question bank\Question bank
+
+2026-01-19 23:38:12 [INFO] Created/Updated file: /app/templates/index.html
+2026-01-19 23:38:12 [INFO] Created/Updated file: /app/templates/practice.html
+2026-01-19 23:38:12 [INFO] Created/Updated file: /app/templates/results.html
+2026-01-19 23:38:12 [INFO] Created/Updated file: /app/static/app.css
+2026-01-19 23:38:12 [INFO] Found 1 JSON files under bank root.
+2026-01-19 23:38:12 [INFO] Loaded 1 questions across 1 topics and 1 levels.
+2026-01-19 23:38:12 [INFO] Opening browser at http://127.0.0.1:5000
+2026-01-19 23:38:12 [INFO] Starting server at http://127.0.0.1:5000
+2026-01-19 23:38:19 [INFO] Started set 3990bc0f53ef493497dafa7cafc51c37 mode=mixed topic=— timer=True difficulty=
+2026-01-19 23:38:19 [INFO] Serving question uid=temp_qb/maths/test.json::Q1 file=temp_qb/maths/test.json qid=1
+2026-01-19 23:38:30 [INFO] Started set c4d45e3a6474419caaaa7d125aa3ddf8 mode=mixed topic=— timer=True difficulty=
+2026-01-19 23:38:30 [INFO] Serving question uid=temp_qb/maths/test.json::Q1 file=temp_qb/maths/test.json qid=1
+2026-01-19 23:38:31 [INFO] Stored 1 attempts for set c4d45e3a6474419caaaa7d125aa3ddf8.
+2026-01-19 23:38:31 [INFO] Started set 5ad6be726f4a459fbe8b4ea543ea91aa mode=mixed topic=— timer=True difficulty=
+2026-01-19 23:38:31 [INFO] Serving question uid=temp_qb/maths/test.json::Q1 file=temp_qb/maths/test.json qid=1
+2026-01-19 23:38:31 [INFO] Stored 1 attempts for set 5ad6be726f4a459fbe8b4ea543ea91aa.
+2026-01-19 23:38:31 [INFO] Started set 10a17cedf0e643a290a83cbb244400c8 mode=mixed topic=— timer=True difficulty=
+2026-01-19 23:38:31 [INFO] Serving question uid=temp_qb/maths/test.json::Q1 file=temp_qb/maths/test.json qid=1
+2026-01-19 23:38:31 [INFO] Set 10a17cedf0e643a290a83cbb244400c8 cancelled by user.
+2026-01-19 23:57:58 [INFO] Created/Updated file: /app/templates/index.html
+2026-01-19 23:57:58 [INFO] Created/Updated file: /app/templates/practice.html
+2026-01-19 23:57:58 [INFO] Created/Updated file: /app/templates/results.html
+2026-01-19 23:57:58 [INFO] Created/Updated file: /app/static/app.css
+2026-01-19 23:57:58 [INFO] Found 1 JSON files under bank root.
+2026-01-19 23:57:58 [INFO] Loaded 1 questions across 1 topics and 1 levels.
+2026-01-19 23:57:58 [INFO] Opening browser at http://127.0.0.1:5000
+2026-01-19 23:57:58 [INFO] Starting server at http://127.0.0.1:5000
+2026-01-19 23:58:18 [INFO] Started set 143522165554448ebd9b4678f2b357d2 mode=mixed topic=— timer=True difficulty=
+2026-01-19 23:58:18 [INFO] Serving question uid=temp_qb/maths/test.json::Q1 file=temp_qb/maths/test.json qid=1
+2026-01-19 23:58:19 [INFO] Stored 1 attempts for set 143522165554448ebd9b4678f2b357d2.
+2026-01-20 16:21:36 [INFO] Created/Updated file: /app/templates/index.html
+2026-01-20 16:21:36 [INFO] Created/Updated file: /app/templates/practice.html
+2026-01-20 16:21:36 [INFO] Created/Updated file: /app/templates/results.html
+2026-01-20 16:21:36 [INFO] Created/Updated file: /app/static/app.css
+2026-01-20 16:21:36 [ERROR] Fatal error: Question bank root does not exist: C:\Projects Python\11+ question bank\Question bank
+2026-01-20 16:21:36 [ERROR] Traceback (most recent call last):
+  File "/app/app.py", line 1476, in <module>
+    main()
+  File "/app/app.py", line 1455, in main
+    QB = load_question_bank()
+        ^^^^^^^^^^^^^^^^^^^^
+  File "/app/app.py", line 195, in load_question_bank
+    raise FileNotFoundError(f"Question bank root does not exist: {QUESTION_BANK_ROOT}")
+FileNotFoundError: Question bank root does not exist: C:\Projects Python\11+ question bank\Question bank
+
+2026-01-20 16:22:07 [INFO] Created/Updated file: /app/templates/index.html
+2026-01-20 16:22:07 [INFO] Created/Updated file: /app/templates/practice.html
+2026-01-20 16:22:07 [INFO] Created/Updated file: /app/templates/results.html
+2026-01-20 16:22:07 [INFO] Created/Updated file: /app/static/app.css
+2026-01-20 16:22:07 [ERROR] Fatal error: Question bank root does not exist: C:\Projects Python\11+ question bank\Question bank
+2026-01-20 16:22:07 [ERROR] Traceback (most recent call last):
+  File "/app/app.py", line 1476, in <module>
+    main()
+  File "/app/app.py", line 1455, in main
+    QB = load_question_bank()
+        ^^^^^^^^^^^^^^^^^^^^
+  File "/app/app.py", line 195, in load_question_bank
+    raise FileNotFoundError(f"Question bank root does not exist: {QUESTION_BANK_ROOT}")
+FileNotFoundError: Question bank root does not exist: C:\Projects Python\11+ question bank\Question bank
+
+2026-01-20 16:23:31 [INFO] Created/Updated file: /app/templates/index.html
+2026-01-20 16:23:31 [INFO] Created/Updated file: /app/templates/practice.html
+2026-01-20 16:23:31 [INFO] Created/Updated file: /app/templates/results.html
+2026-01-20 16:23:31 [INFO] Created/Updated file: /app/static/app.css
+2026-01-20 16:23:31 [INFO] Found 1 JSON files under bank root.
+2026-01-20 16:23:31 [INFO] Loaded 1 questions across 1 topics and 1 levels.
+2026-01-20 16:23:31 [INFO] Opening browser at http://127.0.0.1:5000
+2026-01-20 16:23:31 [INFO] Starting server at http://127.0.0.1:5000
+2026-01-20 16:24:48 [INFO] Created/Updated file: /app/templates/index.html
+2026-01-20 16:24:48 [INFO] Created/Updated file: /app/templates/practice.html
+2026-01-20 16:24:48 [INFO] Created/Updated file: /app/templates/results.html
+2026-01-20 16:24:48 [INFO] Created/Updated file: /app/static/app.css
+2026-01-20 16:24:48 [INFO] Found 1 JSON files under bank root.
+2026-01-20 16:24:48 [INFO] Loaded 1 questions across 1 topics and 1 levels.
+2026-01-20 16:24:48 [INFO] Opening browser at http://127.0.0.1:5000
+2026-01-20 16:24:48 [INFO] Starting server at http://127.0.0.1:5000
+2026-01-20 16:25:02 [INFO] Started set 52e82924c5af461a8f68415f054e841b mode=mixed topic=— timer=True difficulty=
+2026-01-20 16:25:02 [INFO] Serving question uid=temp_qb/maths/test.json::Q1 file=temp_qb/maths/test.json qid=1

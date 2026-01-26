@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>11+ Practice</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div>
+        <h1>OHANA 11+ Academy with Stitch</h1>
+        <p class="subtitle">Practice makes you PERFECT!</p>
+      </div>
+    </header>
+
+    {% if ui.show_overdue_banner and overdue_topics %}
+      <div class="card banner">
+        <div class="banner-title">Recommended</div>
+        <div class="banner-body">
+          Overdue topics (not practised in {{ overdue_days }} days):
+          <strong>{{ ", ".join(overdue_topics[:6]) }}{% if overdue_topics|length > 6 %}…{% endif %}</strong>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <h2>Start a set</h2>
+
+      <form method="post" action="{{ url_for('start_set') }}" class="form">
+        <div class="row">
+          <label class="label">Mode</label>
+          <select name="mode" class="input" id="modeSelect">
+            <option value="mixed" {% if default_mode == "mixed" %}selected{% endif %}>Mixed (recommended)</option>
+            <option value="topic" {% if default_mode == "topic" %}selected{% endif %}>By topic</option>
+          </select>
+        </div>
+
+        <!-- Feature 4: Difficulty Selector -->
+        <div class="row">
+          <label class="label">Level</label>
+          <select name="difficulty" class="input">
+            <option value="">All</option>
+            {% for l in levels %}
+              <option value="{{ l }}">{{ l }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="row" id="topicRow" style="display:none;">
+          <label class="label">Topic</label>
+          <select name="topic" class="input">
+            {% for t in topics %}
+              <option value="{{ t }}">{{ t }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="row">
+          <label class="label">Timer</label>
+          <div class="toggle">
+            <input type="checkbox" id="timerToggle" name="timer_enabled" {% if timer_enabled_default %}checked{% endif %}/>
+            <label for="timerToggle">On ({{ timer_minutes }} min)</label>
+          </div>
+          <div class="hint">Timer is subtle on-screen. Set auto-submits when time ends.</div>
+        </div>
+
+        <button class="btn primary" type="submit">Start</button>
+      </form>
+    </div>
+
+    <div class="card small">
+      <h3>Notes</h3>
+      <ul>
+        <li>No changes are ever made to your source question bank folder.</li>
+        <li>Attempts and analytics are stored locally in <code>data/attempts.sqlite</code>.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Stitch Decorations -->
+  <img src="https://media.tenor.com/yheo1GGu3FwAAAAj/stitch.gif" class="stitch-decoration left" alt="Stitch">
+  <img src="https://media.tenor.com/yheo1GGu3FwAAAAj/stitch.gif" class="stitch-decoration right" alt="Stitch">
+
+<style>
+  .stitch-decoration {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 250px;
+    z-index: -1;
+    pointer-events: none; /* Let clicks pass through */
+  }
+  .stitch-decoration.left {
+    left: 20px;
+  }
+  .stitch-decoration.right {
+    right: 20px;
+  }
+  @media (max-width: 1400px) {
+    .stitch-decoration {
+      display: none;
+    }
+  }
+</style>
+
+<script>
+  const modeSelect = document.getElementById('modeSelect');
+  const topicRow = document.getElementById('topicRow');
+  function updateModeUI() {
+    topicRow.style.display = (modeSelect.value === 'topic') ? 'flex' : 'none';
+  }
+  modeSelect.addEventListener('change', updateModeUI);
+  updateModeUI();
+</script>
+</body>
+</html>

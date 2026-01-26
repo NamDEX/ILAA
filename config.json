@@ -1,0 +1,53 @@
+{
+  "app": {
+    "host": "127.0.0.1",
+    "port": 5000,
+    "secret_key": "CHANGE_ME_TO_ANY_RANDOM_STRING"
+  },
+  "paths": {
+    "question_bank_root": "temp_qb",
+    "never_write_to_source": true,
+    "data_dir": "data",
+    "logs_dir": "logs",
+    "exports_dir": "exports"
+  },
+  "practice": {
+    "set_size": 10,
+    "default_mode": "mixed",
+    "overdue_days": 10
+  },
+  "mixed_mode": {
+    "overdue_quota_fraction": 0.3,
+    "weight_overdue_multiplier": 2.0,
+    "weight_recent_wrong_multiplier": 2.5,
+    "weight_recent_correct_multiplier": 0.7,
+    "recent_wrong_days_window": 14,
+    "recent_wrong_attempts_window": 50,
+    "avoid_repeat_within_last_n_sets": 2
+  },
+  "timer": {
+    "enabled_by_default": true,
+    "duration_seconds": 600,
+    "ui_display": "subtle",
+    "auto_submit_on_expiry": true
+  },
+  "ui": {
+    "show_overdue_banner": true,
+    "mobile_friendly": true,
+    "show_question_grid": true,
+    "transitions": {
+      "enabled": false,
+      "style": "generic"
+    }
+  },
+  "sets": {
+    "cancel_marks_set_cancelled": true,
+    "write_attempts_on_cancel": false
+  },
+  "logging": {
+    "level": "DEBUG",
+    "to_console": true,
+    "to_file": true,
+    "file_name": "app.log"
+  }
+}

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Practice Set</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div>
+        <h1>Practice</h1>
+        <p class="subtitle">
+          Question {{ index + 1 }} of {{ total }}{% if mode == "topic" %} · {{ topic }}{% else %} · Mixed{% endif %}
+        </p>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <a href="{{ url_for('index') }}" class="btn secondary">Home</a>
+      </div>
+    </header>
+
+    <!-- Feature 3: Question Grid -->
+    {% if ui_show_grid %}
+    <div class="card small" style="margin-bottom:12px; padding:8px;">
+      <div class="grid-nav">
+        {% for i in range(total) %}
+          {% set st = status_map[i|string] %}
+          <a href="{{ url_for('practice', set_id=set_id, index=i) }}"
+             class="grid-cell {{ st }} {% if i == index %}current{% endif %}">
+            {{ i + 1 }}
+          </a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="stem">{{ q.stem }}</div>
+
+      <form method="post" action="{{ url_for('answer_question', set_id=set_id) }}" class="options">
+        {% for letter, text in q.options.items() %}
+          <label class="option">
+            <!-- Feature 2: Remove required -->
+            <input type="radio" name="selected" value="{{ letter }}" {% if selected == letter %}checked{% endif %} />
+            <span class="letter">{{ letter }}</span>
+            <span class="text">{{ text }}</span>
+          </label>
+        {% endfor %}
+        <input type="hidden" name="index" value="{{ index }}" />
+        <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center;">
+             <button class="btn" type="submit">Next</button>
+        </div>
+      </form>
+
+      <!-- Feature 6: Timer at bottom of card -->
+      {% if timer_enabled %}
+      <div class="timer-subtle footer-timer" aria-label="timer">
+        <div class="timer-bar">
+          <div class="timer-bar-fill" id="timerFill"></div>
+        </div>
+        <div class="timer-text" id="timerText" title="Time remaining (subtle)"></div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="actions" style="margin-top:20px; border-top:1px solid var(--border); padding-top:16px;">
+       <!-- Feature 1: Cancel Button -->
+       <a href="{{ url_for('cancel_set', set_id=set_id) }}" class="btn secondary" style="color:var(--bad);">Cancel Set</a>
+    </div>
+
+  </div>
+
+{% if timer_enabled %}
+<script>
+  const dueEpochMs = {{ due_epoch_ms }};
+  const durationMs = {{ duration_ms }};
+  const fill = document.getElementById('timerFill');
+  const text = document.getElementById('timerText');
+
+  function fmt(ms) {
+    const s = Math.max(0, Math.floor(ms/1000));
+    const m = Math.floor(s/60);
+    const r = s % 60;
+    return m + ":" + (r < 10 ? "0"+r : r);
+  }
+
+  function tick() {
+    const now = Date.now();
+    const remaining = dueEpochMs - now;
+    const elapsed = durationMs - remaining;
+    const pct = Math.min(100, Math.max(0, (elapsed / durationMs) * 100));
+    fill.style.width = pct + "%";
+
+    // Feature 6: always show text (user request)
+    text.textContent = fmt(remaining);
+
+    if (remaining <= 0) {
+      // Auto-submit when time expires
+      fetch("{{ url_for('auto_submit', set_id=set_id) }}", {method: "POST"})
+        .then(() => window.location.href = "{{ url_for('results', set_id=set_id) }}")
+        .catch(() => window.location.href = "{{ url_for('results', set_id=set_id) }}");
+      return;
+    }
+    requestAnimationFrame(tick);
+  }
+  tick();
+</script>
+{% endif %}
+</body>
+</html>
